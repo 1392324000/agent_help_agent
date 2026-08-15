@@ -122,6 +122,8 @@ def cmd_serve(args):
     from agent_sdk.signer import WalletSignerClient
     from agent_sdk import KeyPair as _KP
     from agent_sdk.pricing import CostEstimator, AutoPricer
+    from agent_sdk.protocol import PORT_CONVENTIONS as _pc
+    _AGENT_PORT = _pc["agent"]  # 端口约定：单机一 Agent，统一 18892
 
     def _start_pricer():
         """--auto-price 时启动自动调价（基于成本估算 + 市场行情）。"""
@@ -202,17 +204,11 @@ def cmd_serve(args):
             server.start(background=True)
             break
         except OSError:
-            print(f"⚠ 端口 {port} 被占用，顺延到 {port + 1}……")
-            port += 1
-            if port > args.port + 20:
-                print("端口耗尽，无法启动"); sys.exit(1)
-            # 端口约定：Agent 段上限（默认 18899），超出需显式 --port 指定段外
-            from agent_sdk.protocol import PORT_CONVENTIONS as _pc
-            _amax = _pc["agent_range"][1]
-            if port > _amax:
-                print(f"⚠ Agent 端口段已满（{_pc['agent_range'][0]}-{_amax}），"
-                      f"请用 --port 指定段外端口（或清理占用）")
-                sys.exit(1)
+            # 端口约定：单机一 Agent → 端口固定 18892，被占不自动顺延（避免端口漂移）
+            print(f"❌ 端口 {port} 被占用。")
+            print(f"   约定：单机只部署一个 Agent，端口统一 {_AGENT_PORT}（全平台一致）")
+            print(f"   请先清理占用（ss -tlnp | grep {port}）或显式 --port 指定其他端口")
+            sys.exit(1)
     endpoint = args.endpoint or server.public_url()
     server.advertised_endpoint = endpoint
 

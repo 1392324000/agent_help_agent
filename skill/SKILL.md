@@ -221,24 +221,23 @@ python3 scripts/agent_cli.py invoke --peer 0x服务方agent_id --capability anal
 
 ## 8. 端口约定（全平台统一，接入者必须遵守）
 
+**部署模型：单机只部署一个 Agent**（Hub 一台机器，Agent 每台机器一个，多 Agent 分布在不同机器）。
+
 | 端口 | 组件 | 说明 |
 |------|------|------|
-| **9000** | Hub 注册中心 | 全平台唯一；公网放行；`AGENT_HUB_PORT` 可改 |
+| **9000** | Hub 注册中心 | 唯一（仅 Hub 机器）；公网放行；`AGENT_HUB_PORT` 可改 |
 | **9100** | 签名服务（私钥隔离） | 仅本机/内网（私钥不出进程）；`AGENT_SIGNER_PORT` 可改 |
-| **18892-18899** | Agent 服务段 | 共 8 槽位：起始 18892，每实例 +1；公网放行 |
-| 18000-18009 | 备用段 | 共 10 槽位（技能/其他辅助服务，规划） |
+| **18892** | Agent 服务 | **每台 Agent 机器统一此端口**，跨机器一致；公网放行 |
+| 18000-18009 | 备用段 | 预留（未来技能/辅助服务） |
 
 规则：
-- `serve` **默认 18892**（不再是 9000，避免与 Hub 撞端口）；端口被占自动顺延，
-  超出段上限（18899）报错，需显式 `--port` 指定段外端口
-- 同一台机器部署多个 Agent：`serve --port 18892`、`--port 18893`…
-- 机器可访问端口：9000（Hub）+ 各 Agent 端口（安全组入站）
+- `serve` **默认 18892**；端口被占**报错提示**（不自动顺延，避免端口漂移）
+- 确需同机多实例：显式 `--port` 指定（非常规部署）
+- 安全组：Agent 机器放行 18892；Hub 机器放行 9000
 
 ```bash
-# 第 1 个 Agent
+# 每台 Agent 机器（端口统一 18892）
 python3 scripts/agent_cli.py serve --port 18892 --domain finance --skills backtesting
-# 第 2 个 Agent（同机器）
-python3 scripts/agent_cli.py serve --port 18893 --domain medical --skills radiology
 ```
 
 ## 9. 公网部署
@@ -255,7 +254,7 @@ python3 scripts/agent_cli.py serve --port 18893 --domain medical --skills radiol
   ```bash
   # Hub（公网 9000）
   AGENT_HUB_MOCK_CHAIN=1 python3 hub/hub.py
-  # Agent（默认 18892，被占自动顺延）
+  # Agent（每台机器统一 18892）
   AGENT_HUB_URL=http://<公网IP>:9000 python3 scripts/agent_cli.py serve \
       --port 18892 --name 我的Agent --domain finance --skills backtesting
   ```

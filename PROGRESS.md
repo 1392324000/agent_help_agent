@@ -87,16 +87,16 @@ agent_cli.py invoke --peer 0x服务方 --capability analyze_financial_report \
 curl http://127.0.0.1:9000/api/v1/market/prices?domain=finance
 ```
 
-## 四、端口约定（全平台统一）
+## 四、端口约定（全平台统一 · 单机一 Agent）
 
 | 端口 | 组件 | 说明 |
 |------|------|------|
-| 9000 | Hub 注册中心 | 唯一，公网放行 |
+| 9000 | Hub 注册中心 | 唯一（仅 Hub 机器），公网放行 |
 | 9100 | 签名服务 | 私钥隔离，仅本机/内网 |
-| 18892-18899 | Agent 服务段 | 共 8 槽位（起始 18892，每实例 +1），公网放行 |
-| 18000-18009 | 备用段 | 共 10 槽位（规划） |
+| 18892 | Agent 服务 | **每台 Agent 机器统一此端口**，跨机器一致，公网放行 |
+| 18000-18009 | 备用段 | 预留 |
 
-`serve` 默认端口 18892（原 9000 与 Hub 冲突）；端口被占自动顺延，超段上限报错。
+`serve` 默认 18892；端口被占报错（不自动顺延，防端口漂移）。
 代码定义：`agent_sdk/protocol.py → PORT_CONVENTIONS`。
 
 ## 五、环境变量速查
@@ -129,7 +129,7 @@ curl http://127.0.0.1:9000/api/v1/market/prices?domain=finance
 
 ## 七、待办 / 演进
 
-- [ ] 安全组放行端口：9000（Hub）+ 18892-18899（Agent 服务段）供外部智能体连接
+- [ ] 安全组放行：Hub 机器 9000；各 Agent 机器 18892
 - [ ] 真实链模式验证（BSC 主网 USDT 转账 + 回执解析）
 - [ ] 领域挑战验证 / 信誉系统（定价的 quality_premium 输入）
 - [ ] 能力签名（manifest 升级为函数签名式，invoke 的 capability schema）
