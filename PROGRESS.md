@@ -87,7 +87,19 @@ agent_cli.py invoke --peer 0x服务方 --capability analyze_financial_report \
 curl http://127.0.0.1:9000/api/v1/market/prices?domain=finance
 ```
 
-## 四、环境变量速查
+## 四、端口约定（全平台统一）
+
+| 端口 | 组件 | 说明 |
+|------|------|------|
+| 9000 | Hub 注册中心 | 唯一，公网放行 |
+| 9100 | 签名服务 | 私钥隔离，仅本机/内网 |
+| 18892+ | Agent 服务 | 每实例 +1（18892, 18893, …），公网放行 |
+| 18000-18099 | 备用段 | 技能/其他辅助（规划） |
+
+`serve` 默认端口已改为 **18892**（原 9000 与 Hub 冲突）；端口被占自动顺延。
+代码定义：`agent_sdk/protocol.py → PORT_CONVENTIONS`。
+
+## 五、环境变量速查
 
 | 变量 | 默认 | 说明 |
 |------|------|------|
@@ -98,6 +110,8 @@ curl http://127.0.0.1:9000/api/v1/market/prices?domain=finance
 | AGENT_HUB_PRICING_FLOOR | 0.5 | 报价下限系数（价格 ≥ 成本×系数） |
 | AGENT_HUB_USDT_CONTRACT | 0x55d3…97955 | BSC USDT 合约地址 |
 | AGENT_PRICE_USDT | 0 | Agent 默认服务报价（USDT/h，serve --price 覆盖） |
+| AGENT_HUB_PORT | 9000 | Hub 端口 |
+| AGENT_SIGNER_PORT | 9100 | 签名服务端口 |
 | AGENT_SECURITY_MODE | redact | 安全边界模式：redact(脱敏)/block(拒绝)/off(仅自身凭据拦截) |
 | AGENT_MARK_INPUTS | 1 | 入站自动打标：外部输入自动包 [UNTRUSTED_INPUT]（0=关闭） |
 | AGENT_AUTO_SECRETS | 1 | 自动收集环境变量中疑似凭据（变量名含 KEY/SECRET/TOKEN/…） |
@@ -106,16 +120,16 @@ curl http://127.0.0.1:9000/api/v1/market/prices?domain=finance
 | AGENT_REQUIRE_REGISTERED | 0 | 1=仅接受已注册握手 |
 | AGENT_RATE_MAX / WINDOW | 60/10 | Agent 接口限流 |
 
-## 五、测试记录（全部通过）
+## 六、测试记录（全部通过）
 
 - 订单状态机 7 项、安全 4 场景、认证 3 场景、群消息签名 3 场景、签名服务、订阅制、token 鉴权、断连恢复
 - **自主报价**：成本估算（A100+gpt-4o=11.5、纯API mini=0.5、T4+local=0.35 USDT/h）；定价引擎（无行情=成本加成、市场高=跟随×0.95、市场低=守底线）；超低价被拒（<成本×0.5）；行情聚合（seed→quotes→deals 三级演进）
 - **Agent 间订阅支付**（端到端）：注册→manifest 报价→订阅订单（1.5h×0.005=0.0075 USDT）→mock 转账→USDT 验证→签发 token→验签✅→invoke 结果✅→伪造 token 403✅→过期 token 拒绝✅→成交汇报→行情更新✅
 - **CLI 全流程**：subscribe（订单/金额/到期/验签/token 持久化）+ invoke（ping/echo 参数传递）✅
 
-## 六、待办 / 演进
+## 七、待办 / 演进
 
-- [ ] 安全组放行 Agent 端口（18892/18893 等）供外部智能体连接
+- [ ] 安全组放行端口：9000（Hub）+ 18892+（Agent 服务段）供外部智能体连接
 - [ ] 真实链模式验证（BSC 主网 USDT 转账 + 回执解析）
 - [ ] 领域挑战验证 / 信誉系统（定价的 quality_premium 输入）
 - [ ] 能力签名（manifest 升级为函数签名式，invoke 的 capability schema）

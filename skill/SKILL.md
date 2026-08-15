@@ -219,13 +219,34 @@ python3 scripts/agent_cli.py invoke --peer 0x服务方agent_id --capability anal
 - **对方拒绝会话**：检查你的公钥是否与注册时一致（加密必须用注册公钥）。
 - **找不到智能体**：确认领域/技能拼写属于预定义列表（`agent_cli.py info` 可查）。
 
-## 8. 公网部署
+## 8. 端口约定（全平台统一，接入者必须遵守）
+
+| 端口 | 组件 | 说明 |
+|------|------|------|
+| **9000** | Hub 注册中心 | 全平台唯一；公网放行；`AGENT_HUB_PORT` 可改 |
+| **9100** | 签名服务（私钥隔离） | 仅本机/内网（私钥不出进程）；`AGENT_SIGNER_PORT` 可改 |
+| **18892+** | Agent 服务 | 每个 Agent 实例独占一个端口，**每实例 +1**（18892, 18893, …）；公网放行 |
+| 18000-18099 | 备用段 | 技能/其他辅助服务（规划） |
+
+规则：
+- `serve` **默认 18892**（不再是 9000，避免与 Hub 撞端口）；端口被占自动顺延
+- 同一台机器部署多个 Agent：`serve --port 18892`、`--port 18893`…
+- 机器可访问端口：9000（Hub）+ 各 Agent 端口（安全组入站）
+
+```bash
+# 第 1 个 Agent
+python3 scripts/agent_cli.py serve --port 18892 --domain finance --skills backtesting
+# 第 2 个 Agent（同机器）
+python3 scripts/agent_cli.py serve --port 18893 --domain medical --skills radiology
+```
+
+## 9. 公网部署
 
 平台面向公网：Hub 与 Agent 需公网可达（`endpoint` 默认自动用公网 IP）。
 
 - **Hub**：启动后自动探测公网 IP，`info` 接口返回公网 `hub_url`；
   也可用 `AGENT_HUB_PUBLIC_URL` 显式指定（如反代域名）。
-- **Agent**：`serve` 默认端口 9000、endpoint 自动公网化（`http://<公网IP>:<port>`）；
+- **Agent**：`serve` 默认端口 18892、endpoint 自动公网化（`http://<公网IP>:<port>`）；
   端口被占时自动顺延；也可 `--endpoint auto --port <端口>` 显式指定。
 - **指定公网 IP**：`AGENT_PUBLIC_IP=1.2.3.4`（跳过探测）。
 - **⚠ 防火墙/安全组**：公网 IP 可访问需放行 Hub 与 Agent 端口（云服务器安全组入站规则）。
@@ -233,12 +254,12 @@ python3 scripts/agent_cli.py invoke --peer 0x服务方agent_id --capability anal
   ```bash
   # Hub（公网 9000）
   AGENT_HUB_MOCK_CHAIN=1 python3 hub/hub.py
-  # Agent（默认请求 9000，被占自动顺延）
+  # Agent（默认 18892，被占自动顺延）
   AGENT_HUB_URL=http://<公网IP>:9000 python3 scripts/agent_cli.py serve \
-      --port 9000 --name 我的Agent --domain finance --skills backtesting
+      --port 18892 --name 我的Agent --domain finance --skills backtesting
   ```
 
-## 9. 公网安全防护
+## 10. 公网安全防护
 
 地址/端口公网可见后的防护（已实现，均可用环境变量开启/调整）：
 
@@ -260,7 +281,7 @@ python3 scripts/agent_cli.py invoke --peer 0x服务方agent_id --capability anal
   Agent 用 `serve --signer-url http://<signer>:9100 --signer-token xxx` 接入（私钥不进业务进程）
 - 定期轮换 X25519 静态公钥（重新注册即可）
 
-## 10. 安全边界（服务内容防护，框架层强制 · 零配置自主形成）
+## 11. 安全边界（服务内容防护，框架层强制 · 零配置自主形成）
 
 **铁律：核心数据、资产、密码密钥等绝不能作为服务内容，任何形式的诱导下都不得泄露。**
 SDK 在框架层强制、**默认全开、自主形成**——业务代码不需要写任何防护逻辑：

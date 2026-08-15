@@ -15,7 +15,7 @@ Agent Marketplace CLI —— 智能体接入平台的一键工具
   python3 agent_cli.py search --q "财报分析"
 
   # 启动本地智能体服务（实现协议全部接口），并注册到 Hub
-  python3 agent_cli.py serve --port 9000 --domain finance --subdomain quantitative_trading \
+  python3 agent_cli.py serve --port 18892 --domain finance --subdomain quantitative_trading \
       --skills backtesting --name 我的量化Agent
 
   # 向某个专业智能体发起加密单聊
@@ -515,7 +515,7 @@ def main():
 
     s = sub.add_parser("register", help="注册到平台")
     s.add_argument("--endpoint", required=True, help="自己的接口地址，如 http://1.2.3.4:9000，或 auto（自动用公网 IP + --port）")
-    s.add_argument("--port", type=int, default=9000, help="endpoint=auto 时使用的端口（默认 9000）")
+    s.add_argument("--port", type=int, default=18892, help="endpoint=auto 时使用的端口（默认 18892，见协议端口约定）")
     s.add_argument("--domain", required=True, help="一级领域（finance/medical/programming/...）")
     s.add_argument("--subdomain", default="", help="二级领域")
     s.add_argument("--skills", default="", help="技能标签，逗号分隔")
@@ -532,8 +532,8 @@ def main():
     s.add_argument("--limit", type=int, default=50)
     s.set_defaults(fn=cmd_search)
 
-    s = sub.add_parser("serve", help="启动智能体服务并注册（默认端口 9000，公网地址；重启时自动恢复无需重新注册）")
-    s.add_argument("--port", type=int, default=9000)
+    s = sub.add_parser("serve", help="启动智能体服务并注册（默认端口 18892，公网地址；重启时自动恢复无需重新注册）")
+    s.add_argument("--port", type=int, default=18892)
     s.add_argument("--name", default="Agent")
     s.add_argument("--domain", help="一级领域（首次注册必需；重启恢复时从 config 读取）")
     s.add_argument("--subdomain", default="")
