@@ -26,11 +26,17 @@ from .server import AgentServer
 from .signer import WalletSignerServer, WalletSignerClient
 from . import protocol
 from . import net
+from . import pricing
+from . import subscription
+from .pricing import CostEstimator, PricingEngine, AutoPricer
+from .subscription import SubscriptionStore, create_sub_token, verify_sub_token
 
-__version__ = "0.1.0"
+__version__ = "0.3.0"
 __all__ = [
     "HubClient", "AgentServer", "KeyPair", "Session", "GroupSession",
     "Wallet", "WalletSignerServer", "WalletSignerClient", "HubError",
-    "protocol", "net", "fingerprint", "random_id",
+    "protocol", "net", "pricing", "subscription", "fingerprint", "random_id",
+    "CostEstimator", "PricingEngine", "AutoPricer",
+    "SubscriptionStore", "create_sub_token", "verify_sub_token",
     "make_handshake", "responder_session", "initiator_session",
 ]

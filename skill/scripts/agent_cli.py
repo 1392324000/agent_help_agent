@@ -121,6 +121,31 @@ def cmd_serve(args):
     import os as _os
     from agent_sdk.signer import WalletSignerClient
     from agent_sdk import KeyPair as _KP
+    from agent_sdk.pricing import CostEstimator, AutoPricer
+
+    def _start_pricer():
+        """--auto-price 时启动自动调价（基于成本估算 + 市场行情）。"""
+        if not args.auto_price:
+            return None
+        cost_est = CostEstimator(gpu=args.gpu, model=args.model,
+                                 tokens_per_hour=args.tokens_per_hour,
+                                 data_cost=args.data_cost, fixed_cost=args.fixed_cost,
+                                 hardware_cost=args.hardware_cost)
+        cost = cost_est.estimate()
+        pricer = AutoPricer(client, cost_per_hour=cost,
+                            profit_margin=args.margin, quality_premium=args.premium,
+                            domain=domain, subdomain=subdomain,
+                            interval=args.price_interval,
+                            on_change=lambda price, detail: setattr(server, "price_usdt_per_hour", price))
+        pricer.start(background=True)
+        try:
+            d = pricer.tick()
+            print(f"[pricer] 首次报价: {d['suggested_price']} USDC/h"
+                  f"（成本 {cost}，市场 median={d.get('market_median')}，提交={d.get('submitted')}）")
+        except Exception as e:
+            print(f"[pricer] ⚠ 首次调价失败: {e}")
+        return pricer
+
     config_dir = _os.path.expanduser("~/.agent-marketplace")
     _os.makedirs(config_dir, exist_ok=True)
     config_path = args.config or _os.path.join(config_dir, "agent.json")
@@ -162,7 +187,17 @@ def cmd_serve(args):
             server = AgentServer(wallet, keys, domain=args.domain or config.get("domain", ""),
                                  subdomain=args.subdomain or config.get("subdomain", ""),
                                  skills=[s.strip() for s in ((args.skills or config.get("skills", "")) if not isinstance(config.get("skills", ""), list) else ",".join(config["skills"])).split(",") if s.strip()],
-                                 port=port, name=args.name)
+                                 port=port, name=args.name,
+                                 price_usdt_per_hour=args.price)
+            if args.demo_invoke:
+                # 演示能力：ping / echo（方便测试订阅-调用链路）
+                def _demo_invoke(sub, cap, p):
+                    if cap == "ping":
+                        return {"pong": True, "at": int(time.time()), "server": args.name}
+                    if cap == "echo":
+                        return {"echo": p.get("text", ""), "subscriber": sub[:10] + "…"}
+                    return None
+                server.on_invoke = _demo_invoke
             client.local_server = server
             server.start(background=True)
             break
@@ -189,6 +224,9 @@ def cmd_serve(args):
                 print(f"   agent_id  : {wallet.address}")
                 print(f"   接口地址  : {endpoint}")
                 print(f"   token     : 已加载（保活/续费/刷新凭证）")
+                domain = args.domain or config.get("domain", "")
+                subdomain = args.subdomain or config.get("subdomain", "")
+                _start_pricer()
                 print("   监听中…… (15 分钟保活一次)")
                 while True:
                     time.sleep(3600)
@@ -224,6 +262,7 @@ def cmd_serve(args):
     print(f"   加密公钥  : {keys.public_b64[:32]}…")
     print(f"   🔑 agent_token: {resp.get('agent_token', '')[:20]}…（保活/续费/刷新凭证，勿泄露）")
     print(f"   🔒 钱包私钥: 已加密存储于 {config_path}（0600 权限）")
+    _start_pricer()
     print("   监听中…… (公网访问需安全组放行端口)")
     while True:
         time.sleep(3600)
@@ -278,6 +317,192 @@ def cmd_manifest(args):
 
 
 # ---------------------------------------------------------------------------
+# 订阅支付（Agent 间 USDT 结算）：订阅 -> 调用
+# ---------------------------------------------------------------------------
+
+def _sub_token_path(peer: str) -> str:
+    return os.path.expanduser(f"~/.agent-marketplace/subscriptions/{peer.lower()}.json")
+
+
+def cmd_subscribe(args):
+    """向服务方订阅（USDT 结算）：申请订单→转账→提交→确认→验签 token。"""
+    client, wallet, _ = _client(args.wallet_key)
+    peer = args.peer.lower()
+    manifest = client.get_peer_manifest(peer)
+    caps = manifest.get("capabilities", {})
+    print(f"📄 服务方 {peer[:14]}…  报价: {manifest.get('price_usdt_per_hour', '?')} USDT/小时")
+    print(f"   领域: {caps.get('domain')}/{caps.get('subdomain')}  技能: {', '.join(caps.get('skills', []))}")
+    print(f"\n① 申请订阅 {args.duration}h……")
+    resp = client.subscribe_to_peer(peer, args.duration, tx_hash=args.tx_hash)
+    if not resp.get("ok"):
+        print(f"❌ 订阅失败: {resp.get('error')}")
+        if resp.get("receiver"):
+            print(f"   真实链模式：请向 {resp['receiver']} 转账 {resp.get('amount_usdt')} USDT 后，"
+                  f"用 --tx-hash 提供交易哈希重试")
+        sys.exit(1)
+    print(f"✅ 订阅成功！")
+    print(f"   订单      : {resp['order_id']}")
+    print(f"   金额      : {resp['amount_usdt']} USDT"
+          f"（{resp.get('price_per_hour')} USDT/h × {args.duration}h）")
+    print(f"   到期      : {time.strftime('%m-%d %H:%M', time.localtime(resp['expires_at']))}")
+    print(f"   token 验签: ✅ 通过（签发者 == {peer[:14]}…，未过期）")
+    # 持久化 token，供 invoke 复用
+    os.makedirs(os.path.dirname(_sub_token_path(peer)), exist_ok=True)
+    with open(_sub_token_path(peer), "w") as f:
+        json.dump({"peer": peer, "token": resp["token"],
+                   "expires_at": resp["expires_at"],
+                   "order_id": resp["order_id"],
+                   "amount_usdt": resp["amount_usdt"]}, f, ensure_ascii=False, indent=2)
+    os.chmod(_sub_token_path(peer), 0o600)
+    print(f"   token 已保存: {_sub_token_path(peer)}（供 invoke 调用）")
+
+
+def cmd_invoke(args):
+    """带订阅 token 调用服务方能力（需求=参数，产物=返回值）。"""
+    client, _, _ = _client(args.wallet_key)
+    peer = args.peer.lower()
+    token = None
+    if args.token_file:
+        token = json.load(open(args.token_file)).get("token")
+    else:
+        path = _sub_token_path(peer)
+        if os.path.exists(path):
+            saved = json.load(open(path))
+            token = saved.get("token")
+            if saved.get("expires_at", 0) < int(time.time()):
+                print(f"⚠ 订阅已到期（{time.strftime('%m-%d %H:%M', time.localtime(saved['expires_at']))}），"
+                      f"请重新 subscribe")
+                sys.exit(1)
+    if not token:
+        print(f"❌ 无订阅 token，请先: agent_cli.py subscribe --peer {peer} --duration 1")
+        sys.exit(1)
+    try:
+        params = json.loads(args.params) if args.params else {}
+    except json.JSONDecodeError:
+        print("❌ --params 必须是 JSON 对象字符串，如 '{\"symbol\":\"BTC\"}'")
+        sys.exit(1)
+    print(f"📡 调用 {peer[:14]}… 能力 [{args.capability}]……")
+    resp = client.invoke(peer, token, args.capability, params)
+    print(json.dumps(resp, ensure_ascii=False, indent=2))
+    if not resp.get("ok"):
+        sys.exit(1)
+
+
+# ---------------------------------------------------------------------------
+# 自主报价：定价 / 自动调价
+# ---------------------------------------------------------------------------
+
+def _load_config(args) -> dict:
+    config_path = args.config or os.path.expanduser("~/.agent-marketplace/agent.json")
+    if not os.path.exists(config_path):
+        print(f"❌ 未找到注册配置 {config_path}，请先 serve 注册")
+        sys.exit(1)
+    return json.load(open(config_path))
+
+
+def cmd_pricing(args):
+    """查看/估算/提交报价：cost=成本估算，market=行情，submit=提交。"""
+    from agent_sdk.pricing import CostEstimator, PricingEngine
+    config = _load_config(args)
+    wallet = Wallet.from_private_hex(args.wallet_key or config.get("wallet_key", ""))
+    keys = KeyPair.from_private_b64(config.get("keys_private", "")) if config.get("keys_private") else KeyPair()
+    client = HubClient(HUB_URL, wallet, keys)
+    client.agent_token = config.get("agent_token")
+    domain = args.domain or config.get("domain", "")
+
+    # 行情
+    market = None
+    try:
+        market = client.market_prices(domain=domain).get("market")
+    except Exception as e:
+        print(f"⚠ 行情不可达: {e}")
+    if market:
+        print(f"📊 市场行情 [{domain or '全部'}]:")
+        print(f"   模式     : {'真实成交分布' if market.get('mode') == 'market' else '种子参考价(冷启动)'}")
+        print(f"   报价数   : {market.get('count')}")
+        print(f"   中位数   : {market.get('median')} USDC/h")
+        print(f"   P25/P75  : {market.get('p25')} / {market.get('p75')} USDC/h")
+        print(f"   区间     : {market.get('min')} ~ {market.get('max')} USDC/h")
+        print(f"   参考锚   : {market.get('reference')} USDC/h")
+
+    # 成本估算
+    cost_est = CostEstimator(gpu=args.gpu, model=args.model,
+                             tokens_per_hour=args.tokens_per_hour,
+                             data_cost=args.data_cost, fixed_cost=args.fixed_cost,
+                             hardware_cost=args.hardware_cost)
+    breakdown = cost_est.breakdown()
+    print(f"\n💰 成本估算 ({args.gpu}/{args.model}):")
+    print(f"   硬件     : {breakdown['hardware']} USDC/h")
+    print(f"   模型 API : {breakdown['model_api']} USDC/h")
+    print(f"   数据     : {breakdown['data_cost']} USDC/h")
+    print(f"   固定     : {breakdown['fixed_cost']} USDC/h")
+    print(f"   ───────────────────────────")
+    print(f"   cost_per_hour = {breakdown['cost_per_hour']} USDC/h")
+
+    # 定价建议
+    engine = PricingEngine(breakdown["cost_per_hour"],
+                           profit_margin=args.margin, quality_premium=args.premium)
+    detail = engine.suggest_with_market(market)
+    print(f"\n💡 建议报价 (利润率 {args.margin:.0%}, 质量溢价 {args.premium:.0%}):")
+    print(f"   成本加成价 : {detail['base_price']} USDC/h")
+    if market and market.get("median"):
+        print(f"   市场收敛   : median={market['median']} → 报价 {detail['suggested_price']} USDC/h")
+    else:
+        print(f"   报价(无行情) = {detail['suggested_price']} USDC/h（成本加成起步）")
+
+    # 提交
+    if args.submit:
+        if not client.agent_token:
+            print("❌ 无 agent_token，无法提交报价（请先 serve 注册）")
+            sys.exit(1)
+        resp = client.submit_pricing(cost_per_hour=detail["cost_per_hour"],
+                                     price=detail["suggested_price"],
+                                     profit_margin=detail["profit_margin"],
+                                     quality_premium=detail["quality_premium"])
+        if resp.get("ok"):
+            print(f"\n✅ {resp.get('message')}")
+        else:
+            print(f"\n❌ 提交失败: {resp.get('error')}")
+            sys.exit(1)
+
+
+def cmd_pricer(args):
+    """启动自动调价：后台循环拉行情→算价→提交，无需人工干预。"""
+    from agent_sdk.pricing import CostEstimator, AutoPricer
+    config = _load_config(args)
+    wallet = Wallet.from_private_hex(args.wallet_key or config.get("wallet_key", ""))
+    keys = KeyPair.from_private_b64(config.get("keys_private", "")) if config.get("keys_private") else KeyPair()
+    client = HubClient(HUB_URL, wallet, keys)
+    client.agent_token = config.get("agent_token")
+    if not client.agent_token:
+        print("❌ 无 agent_token（请先 serve 注册）")
+        sys.exit(1)
+    cost_est = CostEstimator(gpu=args.gpu, model=args.model,
+                             tokens_per_hour=args.tokens_per_hour,
+                             data_cost=args.data_cost, fixed_cost=args.fixed_cost,
+                             hardware_cost=args.hardware_cost)
+    cost = cost_est.estimate()
+    print(f"💰 成本估算: {cost} USDC/h ({args.gpu}/{args.model})")
+    pricer = AutoPricer(client, cost_per_hour=cost,
+                        profit_margin=args.margin, quality_premium=args.premium,
+                        domain=args.domain or config.get("domain", ""),
+                        subdomain=args.subdomain or config.get("subdomain", ""),
+                        interval=args.interval)
+    pricer.start(background=True)
+    # 立即执行一次，然后驻留
+    detail = pricer.tick()
+    print(f"📊 首次调价: {detail['suggested_price']} USDC/h"
+          f"（市场 median={detail.get('market_median')}, 提交={detail.get('submitted')}）")
+    print("   自动调价循环运行中…… (Ctrl+C 停止)")
+    try:
+        while True:
+            time.sleep(3600)
+    except KeyboardInterrupt:
+        pricer.stop()
+        print("已停止")
+
+
+# ---------------------------------------------------------------------------
 
 def main():
     global HUB_URL
@@ -318,6 +543,18 @@ def main():
     s.add_argument("--signer-url", help="签名服务地址（如 http://127.0.0.1:9100），Agent 不持私钥")
     s.add_argument("--signer-token", default=os.environ.get("AGENT_SIGNER_TOKEN", ""))
     s.add_argument("--endpoint", help="对外接口地址（默认自动公网 IP:port，AGENT_PUBLIC_IP 可指定）")
+    s.add_argument("--price", type=float, default=None, help="服务报价（USDT/小时），不传则不报价（订阅接口不可用）")
+    s.add_argument("--demo-invoke", action="store_true", help="启用演示能力 ping/echo（方便测试订阅-调用链路）")
+    s.add_argument("--auto-price", action="store_true", help="启动自动调价（自主报价机制）")
+    s.add_argument("--gpu", default="none", help="自动报价：硬件型号（h100/a100/a10/v100/l4/t4/cpu/none）")
+    s.add_argument("--model", default="none", help="自动报价：模型（gpt-4o/.../local/none）")
+    s.add_argument("--tokens-per-hour", type=int, default=0, help="自动报价：每小时 token 消耗")
+    s.add_argument("--data-cost", type=float, default=0.0, help="自动报价：数据成本均摊 USDC/h")
+    s.add_argument("--fixed-cost", type=float, default=0.0, help="自动报价：固定成本均摊 USDC/h")
+    s.add_argument("--hardware-cost", type=float, default=None, help="自动报价：直接指定硬件成本（有云账单）")
+    s.add_argument("--margin", type=float, default=0.3, help="自动报价：目标利润率（默认 30%%）")
+    s.add_argument("--premium", type=float, default=0.0, help="自动报价：质量溢价")
+    s.add_argument("--price-interval", type=float, default=600.0, help="自动报价：调价周期秒（默认 600）")
     s.set_defaults(fn=cmd_serve)
 
     s = sub.add_parser("renew", help="续费订阅（24h 顺延，token 鉴权）")
@@ -337,11 +574,57 @@ def main():
     s.add_argument("--url", required=True)
     s.set_defaults(fn=cmd_manifest)
 
+    s = sub.add_parser("subscribe", help="向服务方订阅（USDT 结算）：订单→支付→验证→签发token→验签")
+    s.add_argument("--peer", required=True, help="服务方 agent_id（钱包地址）")
+    s.add_argument("--duration", type=float, default=1.0, help="订阅时长（小时，默认 1）")
+    s.add_argument("--tx-hash", help="真实链模式：USDT 转账交易哈希")
+    s.add_argument("--wallet-key")
+    s.set_defaults(fn=cmd_subscribe)
+
+    s = sub.add_parser("invoke", help="带订阅 token 调用服务方能力（RPC：需求=参数，产物=返回值）")
+    s.add_argument("--peer", required=True, help="服务方 agent_id")
+    s.add_argument("--capability", required=True, help="能力名（见 /manifest）")
+    s.add_argument("--params", default="", help="参数 JSON，如 '{\"symbol\":\"BTC\"}'")
+    s.add_argument("--token-file", help="订阅 token 文件（默认 ~/.agent-marketplace/subscriptions/{peer}.json）")
+    s.add_argument("--wallet-key")
+    s.set_defaults(fn=cmd_invoke)
+
     s = sub.add_parser("signer", help="启动钱包签名服务（私钥隔离，Agent 不持私钥）")
     s.add_argument("--port", type=int, default=int(os.environ.get("AGENT_SIGNER_PORT", "9100")))
     s.add_argument("--key", default=os.environ.get("AGENT_WALLET_KEY", ""), help="钱包私钥 hex")
     s.add_argument("--token", default=os.environ.get("AGENT_SIGNER_TOKEN", ""), help="鉴权令牌")
     s.set_defaults(fn=cmd_signer)
+
+    s = sub.add_parser("pricing", help="自主报价：成本估算 + 市场行情 + 定价建议（--submit 提交报价）")
+    s.add_argument("--config", help="注册配置（默认 ~/.agent-marketplace/agent.json）")
+    s.add_argument("--wallet-key")
+    s.add_argument("--domain", help="行情领域（默认用注册配置的 domain）")
+    s.add_argument("--gpu", default="none", help="硬件型号：h100/a100/a10/v100/l4/t4/cpu/none（默认 none=纯 API）")
+    s.add_argument("--model", default="none", help="模型：gpt-4o/gpt-4o-mini/claude-sonnet/claude-haiku/llama-70b/qwen-72b/deepseek/local/none")
+    s.add_argument("--tokens-per-hour", type=int, default=0, help="每小时 token 消耗量（估算 API 成本）")
+    s.add_argument("--data-cost", type=float, default=0.0, help="数据/知识库成本均摊（USDC/h）")
+    s.add_argument("--fixed-cost", type=float, default=0.0, help="固定成本均摊：人力/带宽（USDC/h）")
+    s.add_argument("--hardware-cost", type=float, default=None, help="直接指定硬件成本（有云账单时，覆盖 --gpu）")
+    s.add_argument("--margin", type=float, default=0.3, help="目标利润率（默认 0.3 = 30%%）")
+    s.add_argument("--premium", type=float, default=0.0, help="质量溢价（默认 0，高信誉可加）")
+    s.add_argument("--submit", action="store_true", help="把建议价提交到 Hub（token 鉴权）")
+    s.set_defaults(fn=cmd_pricing)
+
+    s = sub.add_parser("pricer", help="启动自动调价循环（后台：拉行情→算价→提交，无需人工干预）")
+    s.add_argument("--config", help="注册配置（默认 ~/.agent-marketplace/agent.json）")
+    s.add_argument("--wallet-key")
+    s.add_argument("--domain")
+    s.add_argument("--subdomain", default="")
+    s.add_argument("--gpu", default="none")
+    s.add_argument("--model", default="none")
+    s.add_argument("--tokens-per-hour", type=int, default=0)
+    s.add_argument("--data-cost", type=float, default=0.0)
+    s.add_argument("--fixed-cost", type=float, default=0.0)
+    s.add_argument("--hardware-cost", type=float, default=None)
+    s.add_argument("--margin", type=float, default=0.3)
+    s.add_argument("--premium", type=float, default=0.0)
+    s.add_argument("--interval", type=float, default=600.0, help="调价周期（秒，默认 600 = 10 分钟）")
+    s.set_defaults(fn=cmd_pricer)
 
     args = p.parse_args()
     HUB_URL = args.hub.rstrip("/")

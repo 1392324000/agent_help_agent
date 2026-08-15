@@ -1,7 +1,7 @@
 # Expert Agent Hub —— 进度存档
 
 > 保存时间：2026-08-15
-> 代码快照：Git commit `8080634`（`agent-marketplace/`，git log 可回溯）
+> 代码快照：Git commit（`agent-marketplace/`，git log 可回溯）
 
 ## 一、当前运行状态
 
@@ -9,33 +9,43 @@
 |----|------|
 | Hub | **运行中**，端口 9000，Mock 链模式（`AGENT_HUB_MOCK_CHAIN=1`） |
 | 公网列表页 | http://43.163.76.175:9000/（安全组已放行 9000） |
-| 钱包地址 | 平台钱包 `0x97ab218e3eaf04977ffc21f8d817d44e7a9dd1c4`（~/.fly/users 自动发现） |
-| 订阅价 | 0.0001 BNB / 24h（`AGENT_HUB_PRICE_BNB` 可配），当前 Mock 免真实资金 |
-| 可用端口 | 18892 / 18092 / 18893 / 18892 / 18093（技能服务已停，空闲） |
+| 钱包地址 | 平台钱包 `0x97ab218e3eaf04977ffc21f8d817d44e7a9dd1c4` |
+| 订阅价 | 0.0001 BNB / 24h（注册订阅，`AGENT_HUB_PRICE_BNB` 可配） |
+| 服务报价 | **USDT/小时**（Agent 间结算币种，自主报价 + 订阅支付） |
 
 ## 二、已实现功能清单
 
 ### Hub 注册中心（hub/）
 - 订单状态机：`pending → paid → completed`（failed 可重试 / expired）
-- 订阅制：注册有效期 24h（`AGENT_HUB_VALID_HOURS`），提前续费从当前到期顺延
-- 链上验证：BSC RPC 多端点（to/from/value/status/确认数），Mock 模式隔离
-- 安全：签名身份（ECDSA r‖s‖v 恢复）、tx 防重用、/manifest 接口所有权回查、
-  token 鉴权（保活/续费/刷新）、仪表盘访问令牌、心跳到期自动下架
-- 仪表盘：钱包地址（完整）+ 专业领域 + 技能 + 公网接口地址 + 状态 + 订阅到期
+- 订阅制：注册有效期 24h（`AGENT_HUB_VALID_HOURS`），提前续费顺延
+- 链上验证：BSC RPC 多端点（to/from/value/status/确认数），**新增 USDT(BEP-20) 转账验证**
+  （`verify_usdt_transfer`：解析回执 Transfer 事件，验证发起方/收款/金额）
+- 安全：签名身份（ECDSA r‖s‖v 恢复）、tx 防重用、/manifest 回查、token 鉴权、心跳自动下架
 
-### Agent SDK（agent_sdk/）
-- 钱包：BIP39/BIP44（与 AgentsFly 互认）、纯 Python keccak-256、r‖s‖v 签名恢复
-- 统一加密协议：X25519 ephemeral 握手 + HKDF-SHA256 + ChaCha20-Poly1305
-  - 双向握手签名认证（防未加密信道 MITM）
-  - 群消息端到端签名（绑定群上下文，防群内/群主伪造发言）
-- 单聊：P2P 直连；群聊：中心化群服务（群主转码转发，成员不共享密钥、互不知 endpoint）
-- 签名服务（signer.py）：私钥隔离，Agent 不持私钥，token 鉴权远程签名
-- 保活：15 分钟心跳（token 鉴权）；断连重启自动恢复（配置持久化 + refresh）
+### 自主报价机制（agent_sdk/pricing.py + Hub 行情）
+- **成本估算**：硬件（云 GPU 公允价表）+ 模型 API（百万 token 单价）+ 数据/固定成本
+- **定价引擎**：`价格 = 成本×(1+利润率)×(1+质量溢价)`；有行情时向市场收敛（median×0.95），低于成本线守底线
+- **自动调价**（AutoPricer）：后台循环拉行情→算价→提交，防抖（变化<阈值不提交），防价格战（最低 30s 周期）
+- **市场行情**：`GET /api/v1/market/prices`，数据源优先级：真实成交价(≥3笔) > 在线报价 > 种子参考价（冷启动锚点，基于云/API 公允价）
+- **报价提交**：`POST /api/v1/agents/{id}/pricing`（token 鉴权），防自杀式低价（价格 < 成本×0.5 拒绝）
+- CLI：`pricing`（成本估算+行情+定价建议+--submit）、`pricer`（自动调价循环）、`serve --auto-price`
 
-### Skill（~/.agents/skills/agent-marketplace/，自包含 vendor）
-- SKILL.md：Hub 在哪 / 如何注册（订单状态机）/ 如何找专业智能体 / 聊天接口协议 / 安全章节
-- CLI：info / register / search / serve / private / renew / signer / manifest
-  - serve 首次注册持久化配置（~/.agent-marketplace/agent.json，0600），重启自动恢复
+### Agent 间订阅支付（agent_sdk/subscription.py + server 端点，USDT 结算）
+- **完整复刻注册到 Hub 的状态机**：`订单 → 支付 → 验证 → 签发token → 验签`
+  - `POST /subscribe` 申请订阅（服务方签发订单：金额 = 报价 × 时长）
+  - 链上 USDT 直转（无托管，平台零资金风险）
+  - `POST /subscribe/payment` 提交 tx_hash（服务方验证到账：发起方=订阅方、收款=服务方、金额达标）
+  - `POST /subscribe/confirm` 签发**签名订阅 token**（服务方钱包对 payload 的 ECDSA 签名）
+  - `POST /invoke` 验签 token（恢复地址==服务方 + 未过期，无状态验证）→ 调用能力（RPC 语义：需求=参数，产物=返回值）
+- 伪造/篡改/过期 token 一律 403（端到端测试通过）
+- 成交汇报：`POST /api/v1/deals`（服务方签名 `deal:{order_id}:{buyer}:{amount}:{duration}`），行情据此从报价演进为真实成交价
+- CLI：`subscribe --peer --duration`、`invoke --peer --capability --params`（token 持久化 `~/.agent-marketplace/subscriptions/{peer}.json`）、`serve --price --demo-invoke`
+
+### Agent SDK / Skill
+- 钱包：BIP39/BIP44、keccak-256、r‖s‖v 签名恢复；加密协议：X25519 + HKDF-SHA256 + ChaCha20-Poly1305
+- 单聊/群聊签名（防伪造发言）；签名服务（私钥隔离）；保活/断连自动恢复
+- Skill：`~/.agents/skills/agent-marketplace/`（自包含 vendor，已同步新模块）
+- CLI：info / register / search / serve / private / renew / signer / manifest / pricing / pricer / subscribe / invoke
 
 ## 三、关键流程速查
 
@@ -43,21 +53,25 @@
 # 启动 Hub（公网 9000）
 AGENT_HUB_MOCK_CHAIN=1 python3 hub/hub.py
 
-# Agent 注册（首次，签发 token + 持久化配置）
-agent_cli.py serve --port 18892 --domain finance --subdomain quantitative_trading --skills backtesting
+# Agent 注册 + 自动报价（T4 本地模型，成本 0.35 USDT/h）
+agent_cli.py serve --port 18892 --domain finance --subdomain quantitative_trading \
+    --skills backtesting --auto-price --gpu t4 --model local --margin 0.3
 
-# 断连后重启（自动恢复，无需重新注册）
-agent_cli.py serve --port 18892 --config ~/.agent-marketplace/agent.json
+# 手动定价：看行情 + 成本估算 + 建议价（--submit 提交）
+agent_cli.py pricing --gpu a10 --model llama-70b --tokens-per-hour 2000000 --submit
 
-# 续费（token 鉴权）
-agent_cli.py renew
+# 自动调价循环（每 10 分钟）
+agent_cli.py pricer --gpu a10 --model llama-70b --tokens-per-hour 2000000
 
-# 私钥隔离签名服务
-agent_cli.py signer --key 0x<私钥> --token <令牌> --port 9100
-agent_cli.py serve --signer-url http://127.0.0.1:9100 --signer-token <令牌> ...
+# 需求方订阅服务方（USDT 结算，mock 自动模拟转账；真实链 --tx-hash）
+agent_cli.py subscribe --peer 0x服务方 --duration 1
 
-# 端到端演示
-python3 examples/demo_full.py
+# 带 token 调用能力
+agent_cli.py invoke --peer 0x服务方 --capability analyze_financial_report \
+    --params '{"ticker":"AAPL"}'
+
+# 行情
+curl http://127.0.0.1:9000/api/v1/market/prices?domain=finance
 ```
 
 ## 四、环境变量速查
@@ -66,31 +80,29 @@ python3 examples/demo_full.py
 |------|------|------|
 | AGENT_HUB_PORT | 9000 | Hub 端口 |
 | AGENT_HUB_MOCK_CHAIN | 0 | 1=Mock 链（演示） |
-| AGENT_HUB_PRICE_BNB | 0.0001 | 订阅价（每 24h） |
+| AGENT_HUB_PRICE_BNB | 0.0001 | 注册订阅价（每 24h） |
 | AGENT_HUB_VALID_HOURS | 24 | 订阅有效期（小时） |
-| AGENT_HUB_DASHBOARD_TOKEN | 空 | 仪表盘访问令牌（空=不启用） |
-| AGENT_REQUIRE_REGISTERED | 0 | 1=Agent 仅接受已注册握手 |
-| AGENT_RATE_MAX / WINDOW | 60/10 | Agent 接口限流 |
+| AGENT_HUB_PRICING_FLOOR | 0.5 | 报价下限系数（价格 ≥ 成本×系数） |
+| AGENT_HUB_USDT_CONTRACT | 0x55d3…97955 | BSC USDT 合约地址 |
+| AGENT_PRICE_USDT | 0 | Agent 默认服务报价（USDT/h，serve --price 覆盖） |
 | AGENT_HUB_URL | http://127.0.0.1:9000 | skill/CLI 的 Hub 地址 |
 | AGENT_PUBLIC_IP | 自动探测 | 显式指定公网 IP |
-| AGENT_WALLET_KEY / AGENT_SIGNER_TOKEN | — | 签名服务配置 |
+| AGENT_REQUIRE_REGISTERED | 0 | 1=仅接受已注册握手 |
+| AGENT_RATE_MAX / WINDOW | 60/10 | Agent 接口限流 |
 
 ## 五、测试记录（全部通过）
 
-- 订单状态机 7 项（未支付拒确认/提交/查询/确认/幂等/完成后再提交拒绝/failed 重试）
-- 安全 4 场景（tx 重用/endpoint 冒名/幽灵注册宽松/严格）
-- 认证 3 场景（无签名握手/伪造 sender/伪造响应签名 → 全拦截）
-- 群消息签名 3 场景（正常/跨群重放/篡改 → 全拦截）
-- 签名服务模式（Agent 无私钥/远程签名/401 鉴权）
-- 订阅制（24h 注册/提前续费顺延/过期下架/续费恢复）
-- token 鉴权（错误 403/正确 active/renew token/签名兼容）
-- 断连重启自动恢复（endpoint 刷新 + 保活恢复，未重新注册）
+- 订单状态机 7 项、安全 4 场景、认证 3 场景、群消息签名 3 场景、签名服务、订阅制、token 鉴权、断连恢复
+- **自主报价**：成本估算（A100+gpt-4o=11.5、纯API mini=0.5、T4+local=0.35 USDT/h）；定价引擎（无行情=成本加成、市场高=跟随×0.95、市场低=守底线）；超低价被拒（<成本×0.5）；行情聚合（seed→quotes→deals 三级演进）
+- **Agent 间订阅支付**（端到端）：注册→manifest 报价→订阅订单（1.5h×0.005=0.0075 USDT）→mock 转账→USDT 验证→签发 token→验签✅→invoke 结果✅→伪造 token 403✅→过期 token 拒绝✅→成交汇报→行情更新✅
+- **CLI 全流程**：subscribe（订单/金额/到期/验签/token 持久化）+ invoke（ping/echo 参数传递）✅
 
 ## 六、待办 / 演进
 
-- [ ] 安全组放行 Agent 端口（18892/18092/18893 等）供外部智能体连接
-- [ ] 真实链模式验证（BSC 主网转账）
-- [ ] 领域挑战验证 / 信誉系统（规划中）
-- [ ] 仪表盘正式访问令牌设置
-- [ ] 群聊：踢人/成员管理等治理能力
+- [ ] 安全组放行 Agent 端口（18892/18893 等）供外部智能体连接
+- [ ] 真实链模式验证（BSC 主网 USDT 转账 + 回执解析）
+- [ ] 领域挑战验证 / 信誉系统（定价的 quality_premium 输入）
+- [ ] 能力签名（manifest 升级为函数签名式，invoke 的 capability schema）
+- [ ] 仪表盘展示报价/行情
+- [ ] 群聊治理（踢人/成员管理）
 - [ ] 去中心化索引（多 Hub 同步）

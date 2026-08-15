@@ -17,6 +17,8 @@ Agent SDK —— Agent 服务端框架
 from __future__ import annotations
 
 import json
+import re
+import secrets
 import threading
 import time
 from collections import defaultdict
@@ -25,6 +27,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from .crypto import (KeyPair, Session, GroupSession, responder_session, b64d)
 from .wallet import Wallet, recover_address_from_signature
 from . import protocol
+from .subscription import (SubscriptionStore, create_sub_token, verify_sub_token)
 
 # 安全配置（环境变量可调）
 MAX_BODY_BYTES = int(__import__("os").environ.get("AGENT_MAX_BODY_BYTES", "1048576"))   # 请求体上限 1MB
@@ -61,7 +64,8 @@ class AgentServer:
                  domain: str, subdomain: str = "", skills: list[str] | None = None,
                  port: int = 0, host: str = "0.0.0.0",
                  name: str = "", extra_manifest: dict | None = None,
-                 hub_url: str | None = None, require_registered: bool | None = None):
+                 hub_url: str | None = None, require_registered: bool | None = None,
+                 price_usdt_per_hour: float | None = None, verifier=None):
         self.wallet = wallet
         self.keys = keys
         self.agent_id = wallet.address
@@ -80,6 +84,7 @@ class AgentServer:
             __import__("os").environ.get("AGENT_REQUIRE_REGISTERED", "0") == "1"
             if require_registered is None else require_registered
         )
+        self._verifier = verifier  # 链验证器（可注入；None 则懒加载）
         self._rate = _RateLimiter(RATE_LIMIT_WINDOW, RATE_LIMIT_MAX)
         self._registered_cache: dict[str, bool] = {}
         self._registered_ts: float = 0
@@ -93,10 +98,17 @@ class AgentServer:
         self._httpd: ThreadingHTTPServer | None = None
         self._heartbeat_thread: threading.Thread | None = None
 
+        # ---- 订阅支付（Agent 间 USDT 结算）：订单状态机 + 报价 ----
+        self._subscriptions = SubscriptionStore()
+        self.price_usdt_per_hour = max(0.0, float(
+            price_usdt_per_hour if price_usdt_per_hour is not None
+            else __import__("os").environ.get("AGENT_PRICE_USDT", "0")))
+
         # 业务回调（由 Agent 自定义）
         self.on_private_message = None  # fn(sender_id, session, payload)
         self.on_group_message = None    # fn(sender_id, group, payload)
         self.on_channel_request = None  # fn(sender_id, session_id, purpose) -> bool 是否接受
+        self.on_invoke = None           # fn(subscriber_id, capability, params) -> dict|None（订阅调用）
 
     # ------------------------------------------------------------------
     # 安全：已注册校验（AGENT_REQUIRE_REGISTERED=1 时，仅接受平台注册过的 Agent 握手）
@@ -117,6 +129,26 @@ class AgentServer:
             except Exception:
                 return True  # Hub 不可达时宽松放行（可用性优先）
         return self._registered_cache.get(agent_id, False)
+
+    # ------------------------------------------------------------------
+    # 订阅支付：USDT 链上验证（懒加载 ChainVerifier，AGENT_HUB_MOCK_CHAIN=1 走 mock）
+    # ------------------------------------------------------------------
+
+    def _get_verifier(self):
+        if self._verifier is None:
+            from hub.chain_verify import ChainVerifier
+            import os as _os
+            self._verifier = ChainVerifier(
+                mock=_os.environ.get("AGENT_HUB_MOCK_CHAIN", "0") == "1")
+        return self._verifier
+
+    def _verify_usdt(self, tx_hash: str, subscriber: str, amount_usdt: float):
+        """验证订阅方 USDT 到账：发起方=订阅方、收款=本服务、金额达标。"""
+        return self._get_verifier().verify_usdt_transfer(
+            tx_hash, subscriber, self.wallet.address, amount_usdt)
+
+    def is_mock_chain(self) -> bool:
+        return self._get_verifier().mock
 
     # ------------------------------------------------------------------
     # 生命周期
@@ -296,6 +328,7 @@ class AgentServer:
                             "subdomain": owner.subdomain,
                             "skills": owner.skills,
                         },
+                        "price_usdt_per_hour": owner.price_usdt_per_hour,  # 自主报价（USDT/小时）
                         "protocol": "agent-marketplace/v1",
                         **owner.extra_manifest,
                     }
@@ -394,6 +427,107 @@ class AgentServer:
                         owner._group_meta.pop(session_id, None)
                     print(f"[{owner.name}] 🔒 会话 {session_id} 已关闭")
                     return self._send(200, {"ok": True, "closed": session_id})
+
+                # ---- 订阅支付①：申请订阅（服务方签发订单，金额=报价×时长） ----
+                if path == protocol.AGENT_ENDPOINTS["subscribe"]:
+                    subscriber = (body.get("subscriber") or "").strip().lower()
+                    if not re.fullmatch(r"0x[0-9a-f]{40}", subscriber):
+                        return self._send(400, {"ok": False, "error": "subscriber 必须是 0x+40位hex 的钱包地址"})
+                    try:
+                        duration = float(body.get("duration_hours", 0))
+                    except (TypeError, ValueError):
+                        return self._send(400, {"ok": False, "error": "duration_hours 无效"})
+                    if duration <= 0 or duration > 720:
+                        return self._send(400, {"ok": False, "error": "订阅时长需在 (0,720] 小时（最长 30 天）"})
+                    if owner.price_usdt_per_hour <= 0:
+                        return self._send(400, {"ok": False, "error": "本服务暂未报价（price_usdt_per_hour 未设置）"})
+                    order = owner._subscriptions.create(
+                        subscriber, duration, owner.price_usdt_per_hour, owner.wallet.address)
+                    print(f"[{owner.name}] 📄 订阅订单 {order['order_id']} 已签发"
+                          f"（{subscriber[:12]}…，{duration}h × {order['price_per_hour']} USDT/h = {order['amount_usdt']} USDT）")
+                    return self._send(201, {
+                        "ok": True, "order_id": order["order_id"], "status": "pending",
+                        "amount_usdt": order["amount_usdt"], "receiver": order["receiver"],
+                        "valid_hours": order["duration_hours"],
+                        "price_per_hour": order["price_per_hour"],
+                        "chain": "mock" if owner.is_mock_chain() else "bsc-mainnet",
+                    })
+
+                # ---- 订阅支付：mock 模拟 USDT 转账（仅演示模式） ----
+                if path == "/subscribe/mock":
+                    if not owner.is_mock_chain():
+                        return self._send(403, {"ok": False, "error": "当前为真实 BSC 模式，不允许模拟转账"})
+                    order = owner._subscriptions.get(body.get("order_id", ""))
+                    if not order:
+                        return self._send(404, {"ok": False, "error": "订单不存在"})
+                    tx = "0x" + secrets.token_hex(32)
+                    owner._get_verifier().mock_record_usdt(
+                        tx, order["subscriber"], owner.wallet.address, order["amount_usdt"])
+                    return self._send(200, {"ok": True, "tx_hash": tx,
+                                            "note": "mock 模式模拟 USDT 转账（演示，非真实链）"})
+
+                # ---- 订阅支付②：提交支付结果（B 验证 USDT 到账） ----
+                if path == protocol.AGENT_ENDPOINTS["subscribe_payment"]:
+                    order_id = body.get("order_id", "")
+                    tx_hash = (body.get("tx_hash") or "").strip()
+                    order = owner._subscriptions.get(order_id)
+                    if not order:
+                        return self._send(404, {"ok": False, "error": "订单不存在"})
+                    if owner._subscriptions.is_expired(order_id):
+                        return self._send(400, {"ok": False, "error": "订单已过期，请重新申请订阅"})
+                    if order["status"] != "pending":
+                        return self._send(400, {"ok": False, "error": f"订单状态为 {order['status']}，仅 pending 可提交支付"})
+                    if not re.fullmatch(r"0x[0-9a-f]{64}", tx_hash):
+                        return self._send(400, {"ok": False, "error": "tx_hash 必须是 0x+64位hex"})
+                    ok, msg = owner._verify_usdt(tx_hash, order["subscriber"], order["amount_usdt"])
+                    if not ok:
+                        return self._send(400, {"ok": False, "error": f"USDT 验证失败: {msg}"})
+                    owner._subscriptions.mark_paid(order_id, tx_hash)
+                    print(f"[{owner.name}] 💰 订单 {order_id} 已支付"
+                          f"（{order['amount_usdt']} USDT，{msg}）")
+                    return self._send(200, {"ok": True, "status": "paid",
+                                            "message": "USDT 已到账，可确认签发 token"})
+
+                # ---- 订阅支付③：确认 -> 签发签名订阅 token ----
+                if path == protocol.AGENT_ENDPOINTS["subscribe_confirm"]:
+                    order_id = body.get("order_id", "")
+                    order = owner._subscriptions.get(order_id)
+                    if not order:
+                        return self._send(404, {"ok": False, "error": "订单不存在"})
+                    if order["status"] != "paid":
+                        return self._send(400, {"ok": False, "error": f"订单状态为 {order['status']}，需先支付并验证"})
+                    token = create_sub_token(owner.wallet, order["subscriber"],
+                                             order["duration_hours"], order_id)
+                    owner._subscriptions.mark_completed(order_id, token)
+                    print(f"[{owner.name}] 🔑 已签发订阅 token"
+                          f"（{order['subscriber'][:12]}…，{order['duration_hours']}h，至 "
+                          f"{time.strftime('%m-%d %H:%M', time.localtime(token['payload']['exp']))}）")
+                    return self._send(200, {"ok": True, "token": token,
+                                            "expires_at": token["payload"]["exp"],
+                                            "order_id": order_id,
+                                            "amount_usdt": order["amount_usdt"]})
+
+                # ---- 调用能力：验签 token（签名+时效，无状态验证） ----
+                if path == protocol.AGENT_ENDPOINTS["invoke"]:
+                    payload = verify_sub_token(body.get("token") or {}, owner.wallet.address)
+                    if not payload:
+                        return self._send(403, {"ok": False,
+                                                "error": "订阅 token 无效或已过期（需先 POST /subscribe 订阅）"})
+                    capability = (body.get("capability") or "").strip()
+                    params = body.get("params") or {}
+                    if not capability:
+                        return self._send(400, {"ok": False, "error": "缺少 capability"})
+                    if not owner.on_invoke:
+                        return self._send(501, {"ok": False, "error": "服务方未实现 on_invoke 回调"})
+                    try:
+                        result = owner.on_invoke(payload["sub"], capability, params)
+                    except Exception as e:
+                        return self._send(500, {"ok": False, "error": f"能力执行失败: {e}"})
+                    if result is None:
+                        return self._send(404, {"ok": False, "error": f"未知能力 {capability}"})
+                    return self._send(200, {"ok": True, "result": result,
+                                            "subscriber": payload["sub"],
+                                            "expires_at": payload["exp"]})
 
                 self._send(404, {"ok": False, "error": f"未知接口 {path}"})
 

@@ -17,6 +17,7 @@ from .crypto import (KeyPair, Session, GroupSession, make_handshake,
                      initiator_session, random_id)
 from .wallet import Wallet
 from . import protocol
+from .protocol import HUB_API_PREFIX
 
 USER_AGENT = "agent-marketplace-sdk/1.0"
 
@@ -219,6 +220,116 @@ class HubClient:
         if self.agent_token:
             body["token"] = self.agent_token
         return _post(f"{self.hub_url}{protocol.HUB_ENDPOINTS['heartbeat']}", body)
+
+    # ------------------------------------------------------------------
+    # 自主报价：市场行情 / 提交报价
+    # ------------------------------------------------------------------
+
+    def market_prices(self, domain: str | None = None,
+                      subdomain: str | None = None) -> dict:
+        """拉取市场行情：该领域在线 Agent 的报价分布（median/p25/p75），
+        不足 3 个报价时返回种子参考价（冷启动锚点）。"""
+        qs = []
+        if domain:
+            qs.append(f"domain={domain}")
+        if subdomain:
+            qs.append(f"subdomain={subdomain}")
+        url = f"{self.hub_url}{HUB_API_PREFIX}/market/prices"
+        if qs:
+            url += "?" + "&".join(qs)
+        return _get(url)
+
+    def submit_pricing(self, cost_per_hour: float, price: float,
+                       profit_margin: float = 0.0,
+                       quality_premium: float = 0.0) -> dict:
+        """提交/更新报价（token 鉴权）。Hub 校验价格不低于成本下限。"""
+        if not self.agent_token:
+            raise HubError("无 agent_token（尚未注册成功或未加载凭证）")
+        return _post(f"{self.hub_url}{HUB_API_PREFIX}/agents/{self.agent_id}/pricing", {
+            "token": self.agent_token,
+            "cost_per_hour": cost_per_hour,
+            "price": price,
+            "profit_margin": profit_margin,
+            "quality_premium": quality_premium,
+        })
+
+    # ------------------------------------------------------------------
+    # 订阅支付（Agent 间 USDT 结算）：订阅 -> 调用
+    # ------------------------------------------------------------------
+
+    def get_peer_manifest(self, peer_agent_id: str) -> dict:
+        """拉取对方 /manifest（价格、能力、公钥）。"""
+        peer = self.get_agent(peer_agent_id)
+        resp = _get(f"{peer['endpoint'].rstrip('/')}{protocol.AGENT_ENDPOINTS['manifest']}")
+        if not resp.get("ok"):
+            raise HubError(resp.get("error", "/manifest 获取失败"))
+        return resp["manifest"]
+
+    def subscribe_to_peer(self, peer_agent_id: str, duration_hours: float,
+                          tx_hash: str | None = None, verify_token: bool = True) -> dict:
+        """向服务方订阅：申请订单 → 转账(mock/真实) → 提交 tx_hash → 确认签发 token。
+
+        返回 {"token": {...}, "expires_at": int, "amount_usdt": float,
+              "order_id": str, "price_per_hour": float}。
+        """
+        from .subscription import verify_sub_token
+        peer = self.get_agent(peer_agent_id)
+        endpoint = peer["endpoint"].rstrip("/")
+
+        # ① 申请订阅
+        sub = _post(f"{endpoint}{protocol.AGENT_ENDPOINTS['subscribe']}", {
+            "subscriber": self.agent_id,
+            "duration_hours": duration_hours,
+        })
+        if not sub.get("ok"):
+            return sub
+        order_id = sub["order_id"]
+        amount = sub["amount_usdt"]
+
+        # ② 支付：mock 模式模拟转账；真实模式需要调用方自行转账后提供 tx_hash
+        if not tx_hash:
+            if sub.get("chain") == "mock":
+                m = _post(f"{endpoint}/subscribe/mock", {"order_id": order_id})
+                if not m.get("ok"):
+                    return m
+                tx_hash = m["tx_hash"]
+            else:
+                return {"ok": False, "error": "真实链模式：请先向服务方转账 USDT 后提供 --tx-hash",
+                        "order_id": order_id, "amount_usdt": amount,
+                        "receiver": sub.get("receiver")}
+
+        # ③ 提交支付结果
+        pay = _post(f"{endpoint}{protocol.AGENT_ENDPOINTS['subscribe_payment']}", {
+            "order_id": order_id, "tx_hash": tx_hash,
+        })
+        if not pay.get("ok"):
+            return pay
+
+        # ④ 确认签发 token
+        conf = _post(f"{endpoint}{protocol.AGENT_ENDPOINTS['subscribe_confirm']}",
+                     {"order_id": order_id})
+        if not conf.get("ok"):
+            return conf
+        token = conf["token"]
+
+        # ⑤ 验签：恢复地址必须 == 服务方（防伪造 token）
+        if verify_token:
+            payload = verify_sub_token(token, peer_agent_id)
+            if not payload:
+                return {"ok": False, "error": "token 验签失败：签发者不是声称的服务方或已过期"}
+
+        return {"ok": True, "token": token, "expires_at": conf["expires_at"],
+                "order_id": order_id, "amount_usdt": amount,
+                "price_per_hour": sub.get("price_per_hour"),
+                "chain": sub.get("chain")}
+
+    def invoke(self, peer_agent_id: str, token: dict, capability: str,
+               params: dict | None = None) -> dict:
+        """带订阅 token 调用服务方能力（RPC 语义：需求=参数，产物=返回值）。"""
+        peer = self.get_agent(peer_agent_id)
+        return _post(f"{peer['endpoint'].rstrip('/')}{protocol.AGENT_ENDPOINTS['invoke']}", {
+            "token": token, "capability": capability, "params": params or {},
+        })
 
     # ------------------------------------------------------------------
     # 发起加密单聊

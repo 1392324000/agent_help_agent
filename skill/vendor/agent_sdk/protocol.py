@@ -87,6 +87,66 @@ AGENT_ENDPOINTS = {
     "channel_group": "/channel/group",      # POST
     "channel_message": "/channel/message",  # POST
     "channel_close": "/channel/close",      # POST
+    # ---- 订阅支付（Agent 间 USDT 结算，订单-支付-验证-签发token-验签） ----
+    "subscribe": "/subscribe",              # POST  申请订阅（服务方签发订单）
+    "subscribe_payment": "/subscribe/payment",  # POST 提交 USDT 转账 tx_hash
+    "subscribe_confirm": "/subscribe/confirm",  # POST 服务方确认到账，签发 token
+    "invoke": "/invoke",                   # POST 带 token 调用能力（RPC 语义）
+}
+
+# ---------------------------------------------------------------------------
+# Agent 间订阅协议（USDT 结算，订单状态机与 Hub 注册一致）
+# ---------------------------------------------------------------------------
+
+SUBSCRIBE_REQUEST = {
+    "subscriber": "str, 订阅方 agent_id（钱包地址）",
+    "duration_hours": "float, 订阅时长（小时），金额 = 报价 × 时长",
+}
+
+SUBSCRIBE_RESPONSE = {
+    "ok": True,
+    "order_id": "str, 服务方签发的订单号",
+    "status": "pending",
+    "amount_usdt": "float, 应付 USDT",
+    "receiver": "str, 服务方收款地址（USDT BEP-20）",
+    "valid_hours": "float, 订阅有效期（小时）",
+    "chain": "mock | bsc-mainnet",
+    "price_per_hour": "float, 单价（USDT/小时）",
+}
+
+SUBSCRIBE_PAYMENT = {
+    "order_id": "str",
+    "tx_hash": "str, USDT 转账交易哈希",
+}
+
+SUBSCRIBE_CONFIRM = {
+    "order_id": "str",
+    # 成功时返回：
+    #   token: 签名订阅凭证（服务方钱包对 {sub,iss,dur_h,oid,exp} 的 ECDSA 签名）
+    #   expires_at: 到期时间（Unix 秒）
+}
+
+INVOKE_REQUEST = {
+    "token": "dict, 订阅凭证 {payload, canon, signature}",
+    "capability": "str, 能力名（见 manifest capabilities）",
+    "params": "dict, 参数（JSON）",
+}
+
+INVOKE_RESPONSE = {
+    "ok": True,
+    "result": "dict, 结构化结果",
+    "artifact": "str, 大文件引用（可选）",
+    "usage_seconds": "int, 本次调用耗时（可选，用于用量统计）",
+}
+
+# 订阅凭证 token 载荷（签名绑定，防伪造/防篡改）
+SUB_TOKEN_PAYLOAD = {
+    "v": 1,
+    "sub": "str, 订阅方 agent_id",
+    "iss": "str, 签发方（服务方）agent_id",
+    "dur_h": "float, 订阅时长（小时）",
+    "oid": "str, 订单号",
+    "exp": "int, 到期时间（Unix 秒）",
 }
 
 # ---------------------------------------------------------------------------
