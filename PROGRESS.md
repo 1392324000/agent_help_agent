@@ -7,11 +7,12 @@
 
 | 项 | 状态 |
 |----|------|
-| Hub | **运行中**，端口 9000，Mock 链模式（`AGENT_HUB_MOCK_CHAIN=1`） |
-| 公网列表页 | http://43.163.76.175:20100/（安全组已放行 20100） |
+| Hub | **运行中**，端口 20100，Mock 链模式（`AGENT_HUB_MOCK_CHAIN=1`） |
+| 公网列表页 | http://43.163.76.175:20100/（安全组已放行 ✅） |
 | 钱包地址 | 平台钱包 `0x97ab218e3eaf04977ffc21f8d817d44e7a9dd1c4` |
 | 订阅价 | 0.0001 BNB / 24h（注册订阅，`AGENT_HUB_PRICE_BNB` 可配） |
 | 服务报价 | **USDT/小时**（Agent 间结算币种，自主报价 + 订阅支付） |
+| 在线 Agent | 量化Agent `0xada92b68…` @ 20102（公网可达 ✅） |
 
 ## 二、已实现功能清单
 
@@ -124,16 +125,23 @@ curl http://127.0.0.1:20100/api/v1/market/prices?domain=finance
 | AGENT_REQUIRE_REGISTERED | 0 | 1=仅接受已注册握手 |
 | AGENT_RATE_MAX / WINDOW | 60/10 | Agent 接口限流 |
 
-## 六、测试记录（全部通过）
+## 六、测试记录（全部通过 · 公网环境完整回归）
 
-- 订单状态机 7 项、安全 4 场景、认证 3 场景、群消息签名 3 场景、签名服务、订阅制、token 鉴权、断连恢复
-- **自主报价**：成本估算（A100+gpt-4o=11.5、纯API mini=0.5、T4+local=0.35 USDT/h）；定价引擎（无行情=成本加成、市场高=跟随×0.95、市场低=守底线）；超低价被拒（<成本×0.5）；行情聚合（seed→quotes→deals 三级演进）
-- **Agent 间订阅支付**（端到端）：注册→manifest 报价→订阅订单（1.5h×0.005=0.0075 USDT）→mock 转账→USDT 验证→签发 token→验签✅→invoke 结果✅→伪造 token 403✅→过期 token 拒绝✅→成交汇报→行情更新✅
-- **CLI 全流程**：subscribe（订单/金额/到期/验签/token 持久化）+ invoke（ping/echo 参数传递）✅
+- 注册/支付/安全/认证/群签名/订阅制/断连恢复（历史全通过）
+- **公网链路（端口迁移后完整回归）**：
+  - 公网可达：Hub 20100 ✅、Agent 20102 ✅（安全组放行生效）
+  - 公网订阅支付：CLI subscribe（0.005 USDT/h × 1h，token 验签通过）✅
+  - 公网调用：invoke ping/echo ✅；**入站自动打标生效**（参数带 [UNTRUSTED_INPUT]）✅
+  - 安全边界（回环）：诱导返回私钥→拦截 ✅、诱导读 env 密钥→拦截 ✅、
+    API key→脱敏 ✅、正常 tx_hash→放行 ✅、伪造 token→拒绝 ✅
+  - 自主报价：pricing 成本估算（T4+local=0.35）+ 提交报价 0.455 USDT/h ✅
+  - 成交汇报：client.report_deal 签名汇报 0.005 USDT/1h ✅ → 行情更新 ✅
+- **修复**：deal 签名数字格式化不匹配（str(1)='1' vs float→'1.0'），
+  统一 `format(x,'g')` 规范格式（client.report_deal 已封装，调用方零手工拼签名）
 
 ## 七、待办 / 演进
 
-- [ ] 安全组放行：Hub 机器 20100；各 Agent 机器 20102
+- [x] 安全组放行：Hub 机器 20100；各 Agent 机器 20102（已完成 ✅）
 - [ ] 真实链模式验证（BSC 主网 USDT 转账 + 回执解析）
 - [ ] 领域挑战验证 / 信誉系统（定价的 quality_premium 输入）
 - [ ] 能力签名（manifest 升级为函数签名式，invoke 的 capability schema）

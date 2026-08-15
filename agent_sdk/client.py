@@ -331,6 +331,23 @@ class HubClient:
             "token": token, "capability": capability, "params": params or {},
         })
 
+    def report_deal(self, order_id: str, buyer: str, amount_usdt: float,
+                    duration_hours: float, tx_hash: str = "") -> dict:
+        """服务方签名汇报成交给 Hub（行情数据源）。
+
+        签名消息统一格式：deal:{order_id}:{buyer}:{amount}:{duration}
+        （数字用 'g' 格式去尾零，避免 1 vs 1.0 不匹配）。
+        """
+        amount_s = format(float(amount_usdt), 'g')
+        duration_s = format(float(duration_hours), 'g')
+        message = f"deal:{order_id}:{buyer.lower()}:{amount_s}:{duration_s}"
+        signature = self.wallet.sign_text(message)
+        return _post(f"{self.hub_url}/api/v1/deals", {
+            "order_id": order_id, "buyer": buyer.lower(), "seller": self.agent_id,
+            "amount_usdt": amount_usdt, "duration_hours": duration_hours,
+            "tx_hash": tx_hash, "signature": signature,
+        })
+
     # ------------------------------------------------------------------
     # 发起加密单聊
     # ------------------------------------------------------------------
