@@ -100,6 +100,7 @@ curl http://127.0.0.1:9000/api/v1/market/prices?domain=finance
 实例断连心跳过期自动 offline；订阅未到期重启自动恢复（无需重新注册）。
 
 `serve` 默认 18892；端口被占报错（不自动顺延，防端口漂移）。
+规范只约束 9000/9100/18892；AB 交互中 Agent 自需的其他端口由服务端自定，不在规范之列。
 代码定义：`agent_sdk/protocol.py → PORT_CONVENTIONS`。
 
 ## 五、环境变量速查

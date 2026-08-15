@@ -88,6 +88,8 @@ def is_valid_domain(domain: str, subdomain: str | None = None) -> bool:
 #   18892         Agent 服务（每台机器统一此端口，跨机器一致；公网放行）
 # 规则：单机一 Agent → 端口固定 18892，被占即报错（不自动顺延，避免端口漂移）；
 #       确需同机多实例时显式 --port 指定。
+# 边界：本规范只约束上述三个固定端口；Agent 在实际提供服务/交互过程中
+#       自行需要的其他端口（内部服务、辅助服务等）由服务端自定，不在规范之列。
 PORT_CONVENTIONS = {
     "hub": 9000,               # Hub 注册中心
     "signer": 9100,            # 私钥隔离签名服务
