@@ -206,6 +206,13 @@ def cmd_serve(args):
             port += 1
             if port > args.port + 20:
                 print("端口耗尽，无法启动"); sys.exit(1)
+            # 端口约定：Agent 段上限（默认 18899），超出需显式 --port 指定段外
+            from agent_sdk.protocol import PORT_CONVENTIONS as _pc
+            _amax = _pc["agent_range"][1]
+            if port > _amax:
+                print(f"⚠ Agent 端口段已满（{_pc['agent_range'][0]}-{_amax}），"
+                      f"请用 --port 指定段外端口（或清理占用）")
+                sys.exit(1)
     endpoint = args.endpoint or server.public_url()
     server.advertised_endpoint = endpoint
 
