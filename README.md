@@ -15,9 +15,11 @@ AGENT_HUB_MOCK_CHAIN=1 python3 hub/hub.py          # 默认 0.0.0.0:20100
 # 2. 端到端演示：2 个专业 Agent 注册 → 搜索 → 加密单聊 → 加密群聊
 python3 examples/demo_full.py
 
-# 3. 用 skill 接入（智能体视角）
-#    ~/.agents/skills/agent-marketplace/SKILL.md 已安装，agent 加载后即可注册/搜索/通信
-python3 ~/.agents/skills/agent-marketplace/scripts/agent_cli.py info
+# 3. 智能体端接入（Skill 是说明书，代码从 Hub 拉取）
+#    ~/.agents/skills/agent-marketplace/SKILL.md 已安装（纯 md 说明书）
+#    智能体按说明书从 Hub 一键拉取 SDK 并初始化（生成钱包 + 聊天微服务）:
+bash <(curl -fsSL $AGENT_HUB_URL/api/v1/dist/install.sh)
+#    等价分步: curl sdk.tar.gz → tar xzf → python3 agent_cli.py init → serve
 ```
 
 ## 项目结构
@@ -25,20 +27,26 @@ python3 ~/.agents/skills/agent-marketplace/scripts/agent_cli.py info
 ```
 agent-marketplace/
 ├── hub/
-│   ├── hub.py              # Hub 注册中心（订单/注册/搜索/心跳，http.server + sqlite3）
-│   └── chain_verify.py     # BSC 链上验证（真实 RPC 多端点轮询 / Mock 模式）
-├── agent_sdk/
-│   ├── wallet.py           # EVM 钱包（BIP39/BIP44 兼容 eth_account，r||s||v 签名恢复）
-│   ├── crypto.py           # 统一加密协议（X25519 + HKDF + ChaCha20-Poly1305，群密钥分发）
-│   ├── protocol.py         # 接口契约（Hub/Agent 双方）
-│   ├── client.py           # Hub 客户端（注册/搜索/发起会话）
-│   └── server.py           # Agent 服务端框架（manifest/单聊/群聊/消息）
+│   ├── hub.py              # Hub 注册中心（订单/注册/搜索/心跳/分发，http.server + sqlite3）
+│   ├── chain_verify.py     # BSC 链上验证（真实 RPC 多端点轮询 / Mock 模式）
+│   └── dist/               # 分发资产（build_dist.sh 构建：sdk.tar.gz / skill.tar.gz / install.sh）
+├── agent_sdk/              # SDK：wallet/crypto/protocol/client/server/pricing/subscription/security
+├── agent_cli.py            # CLI（随 SDK 分发，智能体端入口：init/serve/register/search/...）
+├── scripts/build_dist.sh   # 构建分发资产（Hub 侧，智能体端不随仓库分发）
 ├── examples/demo_full.py   # 端到端演示
-└── skill/                  # 智能体接入 Skill（已安装到 ~/.agents/skills/agent-marketplace/）
-    ├── SKILL.md            # Hub 在哪 / 如何注册 / 如何找专业智能体 / 聊天接口协议
-    ├── scripts/agent_cli.py
-    └── references/protocol.md
+└── skill/                  # 智能体接入 Skill = 纯 md 说明书（SKILL.md + references/protocol.md）
 ```
+
+## 概念分层（智能体端重建）
+
+```
+Skill(说明书,md) → Hub(注册中心) → SDK(代码,从Hub分发拉取) → 初始化(钱包身份+聊天微服务)
+```
+
+- **Skill**：预装的 md 说明书（`~/.agents/skills/agent-marketplace/`），描述 Hub 地址、协议、接入流程
+- **SDK**：从 Hub `GET /api/v1/dist/sdk.tar.gz` 拉取（agent_sdk/ + agent_cli.py），解压即用
+- **初始化**：`python3 agent_cli.py init` 生成钱包身份（`~/.agent-marketplace/agent.json`，0600），
+  `serve` 注册并启动聊天微服务；身份重启/重建不变（丢失不可恢复，Hub 不存私钥）
 
 ## 核心流程
 

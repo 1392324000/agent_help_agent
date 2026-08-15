@@ -29,12 +29,14 @@ import os
 import sys
 import time
 
-# 自动发现 agent_sdk：优先 skill 内置 vendor，其次项目源码目录
+# 自动发现 agent_sdk：优先本包（agent_cli.py 与 agent_sdk/ 同级，SDK 随 Hub 分发解压即用），
+# 其次兼容旧版 skill 内置 vendor
 _HERE = os.path.dirname(os.path.abspath(__file__))
 for _cand in (
-    os.path.join(_HERE, "..", "vendor"),                       # skill 内置
-    os.path.join(_HERE, "..", "..", "..", ".."),              # 项目根（agent-marketplace/ 上一级之外）
-    os.path.join(_HERE, "..", "..", ".."),                    # 其他布局
+    _HERE,                                          # SDK 包内（标准布局）
+    os.path.join(_HERE, "..", "vendor"),           # 旧 skill 内置（向后兼容）
+    os.path.join(_HERE, "..", "..", "..", ".."),  # 项目根
+    os.path.join(_HERE, "..", "..", ".."),        # 其他布局
 ):
     _p = os.path.abspath(_cand)
     if os.path.isdir(os.path.join(_p, "agent_sdk")):
@@ -58,6 +60,66 @@ def cmd_info(args):
     client, _, _ = _client()
     info = client.info()
     print(json.dumps(info, ensure_ascii=False, indent=2))
+
+
+def cmd_init(args):
+    """初始化智能体端：生成/加载钱包身份并持久化（不注册、不启动服务）。
+
+    供 SDK 从 Hub 分发拉取后的一键初始化：
+        python3 agent_cli.py init
+    生成 ~/.agent-marketplace/agent.json（钱包私钥 + X25519 加密密钥对），
+    身份固定，此后 serve/register 复用同一身份，重启不变。
+    """
+    import os as _os
+    config_dir = _os.path.expanduser("~/.agent-marketplace")
+    _os.makedirs(config_dir, exist_ok=True)
+    config_path = args.config or _os.path.join(config_dir, "agent.json")
+
+    config = {}
+    if _os.path.exists(config_path):
+        try:
+            config = json.load(open(config_path))
+        except Exception:
+            config = {}
+
+    # ---- 钱包（优先 wallet-key > 已有配置 > 新建） ----
+    if args.wallet_key:
+        wallet = Wallet.from_private_hex(args.wallet_key)
+        config["wallet_key"] = args.wallet_key
+    elif config.get("wallet_key"):
+        wallet = Wallet.from_private_hex(config["wallet_key"])
+    else:
+        wallet = Wallet.generate()
+        config["wallet_key"] = wallet.private_hex
+
+    # ---- X25519 加密密钥对（持久化，公钥不变） ----
+    if config.get("keys_private"):
+        keys = KeyPair.from_private_b64(config["keys_private"])
+    else:
+        keys = KeyPair()
+        config["keys_private"] = keys.private_b64
+
+    config["agent_id"] = wallet.address
+    config["public_key"] = keys.public_b64
+    _os.chmod(config_path, 0o600) if _os.path.exists(config_path) else None
+    with open(config_path, "w") as f:
+        json.dump(config, f, ensure_ascii=False, indent=2)
+    _os.chmod(config_path, 0o600)
+
+    print("=" * 56)
+    print(" 智能体端初始化完成 ✅")
+    print("=" * 56)
+    print(f"  身份文件 : {config_path}（0600，含钱包私钥，勿泄露）")
+    print(f"  agent_id : {wallet.address}")
+    print(f"  加密公钥 : {keys.public_b64[:24]}…")
+    print(f"  Hub      : {HUB_URL}")
+    print()
+    print("  下一步（注册并启动聊天微服务）:")
+    print(f"    python3 {_os.path.basename(__file__)} serve \\")
+    print("      --domain finance --subdomain quantitative_trading \\")
+    print("      --skills backtesting --price 0.005 --auto-price")
+    print("  身份已固定：重启/重建后 serve 自动恢复，无需重新 init")
+    print("=" * 56)
 
 
 def cmd_register(args):
@@ -173,9 +235,9 @@ def cmd_serve(args):
 
     # ---- X25519 加密密钥（持久化，重启公钥不变） ----
     if config.get("keys_private"):
-        keys = _KP.from_private_b64(config["keys_private"])
+        keys = KeyPair.from_private_b64(config["keys_private"])
     else:
-        keys = _KP()
+        keys = KeyPair()
         config["keys_private"] = keys.private_b64
 
     client = HubClient(HUB_URL, wallet, keys)
@@ -515,6 +577,11 @@ def main():
 
     s = sub.add_parser("info", help="查看平台信息")
     s.set_defaults(fn=cmd_info)
+
+    s = sub.add_parser("init", help="初始化智能体端：生成/加载钱包身份（不注册、不启动服务，供 SDK 从 Hub 拉取后一键初始化）")
+    s.add_argument("--config", help="身份持久化文件（默认 ~/.agent-marketplace/agent.json）")
+    s.add_argument("--wallet-key", help="钱包私钥 hex（不传则生成新钱包并持久化）")
+    s.set_defaults(fn=cmd_init)
 
     s = sub.add_parser("register", help="注册到平台")
     s.add_argument("--endpoint", required=True, help="自己的接口地址，如 http://1.2.3.4:20102，或 auto（自动用公网 IP + --port）")
