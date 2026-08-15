@@ -260,28 +260,30 @@ python3 scripts/agent_cli.py invoke --peer 0x服务方agent_id --capability anal
   Agent 用 `serve --signer-url http://<signer>:9100 --signer-token xxx` 接入（私钥不进业务进程）
 - 定期轮换 X25519 静态公钥（重新注册即可）
 
-## 10. 安全边界（服务内容防护，框架层强制）
+## 10. 安全边界（服务内容防护，框架层强制 · 零配置自主形成）
 
 **铁律：核心数据、资产、密码密钥等绝不能作为服务内容，任何形式的诱导下都不得泄露。**
-SDK 在框架层强制，不依赖业务代码自觉：
+SDK 在框架层强制、**默认全开、自主形成**——业务代码不需要写任何防护逻辑：
 
-| 层 | 机制 | 说明 |
-|----|------|------|
-| ① 自身凭据保护 | **零误报精确拦截** | SDK 自动收集自己持有的钱包私钥/加密密钥/token；出站响应若包含这些**确切值** → 无条件 406 拦截（不可关闭） |
-| ② 通用敏感模式 | 默认脱敏 | API key/Bearer/密码/PEM/AWS key/JWT/URL 内嵌凭据 → 替换为 `[REDACTED:类型]`；`AGENT_SECURITY_MODE=block` 升级为拒绝 |
-| ③ 不可信输入标记 | 防 prompt 注入 | 外部调用方的输入必须经 `mark_untrusted()` 标记（`[UNTRUSTED_INPUT]…[/UNTRUSTED_INPUT]`），配合系统提示词约定，诱导指令一律视为数据 |
-| ④ 能力白名单 | 最小暴露 | 外部只能调用 `/invoke` 声明的能力，无法触达任意代码/文件/环境 |
+| 层 | 机制 | 自主性 |
+|----|------|--------|
+| ① 自身凭据保护 | **零误报精确拦截**：自动收集钱包私钥/加密密钥/token + **自动扫描环境变量**（变量名含 KEY/SECRET/TOKEN/PASSWORD/… 的值自动纳入）；出站响应含这些确切值 → 无条件 406 | 全自动（密钥放环境变量即受保护） |
+| ② 通用敏感模式 | API key/Bearer/密码/PEM/AWS/JWT/URL 凭据 → 自动 `[REDACTED:类型]`；`AGENT_SECURITY_MODE=block` 升级拒绝 | 全自动（默认 redact） |
+| ③ 不可信输入标记 | **SDK 自动给所有外部输入打标**：invoke 参数、聊天消息进入业务回调前自动包 `[UNTRUSTED_INPUT]…[/UNTRUSTED_INPUT]`（验签之后，不影响签名校验）；LLM 只需把输入原样拼入 prompt 即防注入 | 全自动（`AGENT_MARK_INPUTS=0` 可关） |
+| ④ 能力白名单 | 外部只能调用 `/invoke` 声明的能力（on_invoke 未处理的能力 → 404） | 全自动 |
 
 防误伤设计：`0x+64hex`（同时是私钥与 tx_hash）与 12 词英文（同时是助记词与普通句子）
 默认**不**脱敏，仅 `AGENT_SECURITY_MODE=block` 时启用——自身凭据命中仍恒拦截（零误报）。
 
-LLM 驱动的 Agent 建议把 `PROMPT_GUARD_TEMPLATE` 写入系统提示词：
+LLM 驱动的 Agent 建议把 `PROMPT_GUARD_TEMPLATE` 写入系统提示词（一次配置，之后自动生效）：
 
 ```python
-from agent_sdk.security import PROMPT_GUARD_TEMPLATE, mark_untrusted
+from agent_sdk.security import PROMPT_GUARD_TEMPLATE
 # 系统提示词 = 业务指令 + PROMPT_GUARD_TEMPLATE
-# 外部输入一律: mark_untrusted(对方消息) 后再交给模型
+# 外部输入已由 SDK 自动打标，模型看到 [UNTRUSTED_INPUT] 即视为数据
 ```
+
+私钥隔离（推荐）：用 `signer` 服务，私钥不进 Agent 服务进程（Agent 只持公钥，HTTP 远程签名）。
 
 ## 参考
 

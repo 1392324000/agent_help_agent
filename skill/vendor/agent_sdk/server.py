@@ -28,7 +28,8 @@ from .crypto import (KeyPair, Session, GroupSession, responder_session, b64d)
 from .wallet import Wallet, recover_address_from_signature
 from . import protocol
 from .subscription import (SubscriptionStore, create_sub_token, verify_sub_token)
-from .security import guard_outbound, collect_own_secrets
+from .security import (guard_outbound, collect_own_secrets, mark_inputs_auto,
+                       mark_untrusted)
 
 # 安全配置（环境变量可调）
 MAX_BODY_BYTES = int(__import__("os").environ.get("AGENT_MAX_BODY_BYTES", "1048576"))   # 请求体上限 1MB
@@ -109,6 +110,9 @@ class AgentServer:
         self.security_mode = (__import__("os").environ
                               .get("AGENT_SECURITY_MODE", "redact").strip().lower())
         self._known_secrets = collect_own_secrets(wallet, keys)
+        # 入站自动打标：外部输入自动包 [UNTRUSTED_INPUT] 标记（防注入诱导，默认开）
+        self.mark_inputs = (__import__("os").environ
+                            .get("AGENT_MARK_INPUTS", "1") != "0")
 
         # 业务回调（由 Agent 自定义）
         self.on_private_message = None  # fn(sender_id, session, payload)
@@ -269,6 +273,11 @@ class AgentServer:
             session = self._sessions.get(session_id)
         if session:
             payload = session.decrypt_envelope(env)
+            # 🔒 入站自动打标：外部输入自动包 [UNTRUSTED_INPUT] 标记（验签之后，不影响签名校验）
+            marked = payload
+            if self.mark_inputs and isinstance(payload.get("content"), str):
+                marked = dict(payload)
+                marked["content"] = mark_untrusted(payload["content"])
             # 群服务转发的群消息：用与群服务的会话密钥解密，payload.sender 为原始发送者
             if group_id:
                 # 端到端签名校验：确认发言者身份真实（群主也无法伪造成员）
@@ -276,10 +285,10 @@ class AgentServer:
                     print(f"[{self.name}] ⚠ 群消息签名验证失败，已丢弃（来源 {payload.get('sender','?')[:12]}…）")
                     return {"ok": False, "error": "群消息签名验证失败"}
                 if self.on_group_message:
-                    self.on_group_message(payload.get("sender", ""), session, payload)
+                    self.on_group_message(payload.get("sender", ""), session, marked)
                 return {"ok": True, "ack": True}
             if self.on_private_message:
-                self.on_private_message(env.get("sender", ""), session, payload)
+                self.on_private_message(env.get("sender", ""), session, marked)
             return {"ok": True, "ack": True}
 
         return {"ok": False, "error": f"未知会话 {session_id}（未握手或会话已关闭）"}
@@ -525,6 +534,9 @@ class AgentServer:
                         return self._send(400, {"ok": False, "error": "缺少 capability"})
                     if not owner.on_invoke:
                         return self._send(501, {"ok": False, "error": "服务方未实现 on_invoke 回调"})
+                    # 🔒 入站自动打标：外部参数自动包 [UNTRUSTED_INPUT]（防注入诱导）
+                    if owner.mark_inputs:
+                        params = mark_inputs_auto(params)
                     try:
                         result = owner.on_invoke(payload["sub"], capability, params)
                     except Exception as e:

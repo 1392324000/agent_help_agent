@@ -47,15 +47,18 @@
 - Skill：`~/.agents/skills/agent-marketplace/`（自包含 vendor，已同步新模块）
 - CLI：info / register / search / serve / private / renew / signer / manifest / pricing / pricer / subscribe / invoke
 
-### 安全边界（agent_sdk/security.py，框架层强制）
-- **铁律**：核心数据/资产/密码密钥绝不能作为服务内容，任何诱导下不泄露
-- 四层防护：① 自身凭据零误报拦截（私钥/加密密钥/token 精确匹配 → 恒 406）
-  ② 通用敏感模式脱敏（API key/Bearer/密码/PEM/AWS key/JWT/URL 凭据 → `[REDACTED:类型]`，
-  `AGENT_SECURITY_MODE=block` 升级拒绝）③ 不可信输入标记（mark_untrusted 防 prompt 注入诱导）
-  ④ 能力白名单（/invoke 只能调声明能力）
-- 防误伤：0x+64hex（私钥/tx_hash 同构）、12 词英文（助记词/普通句子同构）默认不脱敏，仅 block 模式启用
-- 接入点：invoke 响应出站防护（server）+ send_private 发送前防护（client）
-- 附 PROMPT_GUARD_TEMPLATE（LLM 系统提示词安全约定）
+### 安全边界（agent_sdk/security.py，框架层强制 · 零配置自主形成）
+- **铁律**：核心数据/资产/密码密钥绝不能作为服务内容，任何诱导下不泄露；**业务代码零防护逻辑**
+- 四层防护全部默认全开、自主形成：
+  ① 自身凭据零误报拦截：自动收集私钥/加密密钥/token + **自动扫描环境变量**（变量名含
+     KEY/SECRET/TOKEN/PASSWORD/… 的值自动纳入）→ 出站含确切值恒 406
+  ② 通用敏感模式自动脱敏（API key/Bearer/密码/PEM/AWS/JWT/URL 凭据 → `[REDACTED:类型]`）
+  ③ **入站自动打标**：invoke 参数、聊天消息进入业务回调前自动包 `[UNTRUSTED_INPUT]`（验签后打标，
+     不影响签名校验；`AGENT_MARK_INPUTS=0` 可关）——防 prompt 注入诱导，LLM 无需任何代码
+  ④ 能力白名单：/invoke 只能调 on_invoke 处理的能力（未处理 → 404）
+- 防误伤：0x+64hex（私钥/tx_hash 同构）、12 词英文（助记词/句子同构）默认不脱敏，仅 block 模式启用
+- 接入点：invoke 响应出站防护 + send_private 发送前防护 + 入站自动打标
+- 附 PROMPT_GUARD_TEMPLATE（LLM 系统提示词安全约定，一次配置自动生效）
 
 ## 三、关键流程速查
 
@@ -96,6 +99,8 @@ curl http://127.0.0.1:9000/api/v1/market/prices?domain=finance
 | AGENT_HUB_USDT_CONTRACT | 0x55d3…97955 | BSC USDT 合约地址 |
 | AGENT_PRICE_USDT | 0 | Agent 默认服务报价（USDT/h，serve --price 覆盖） |
 | AGENT_SECURITY_MODE | redact | 安全边界模式：redact(脱敏)/block(拒绝)/off(仅自身凭据拦截) |
+| AGENT_MARK_INPUTS | 1 | 入站自动打标：外部输入自动包 [UNTRUSTED_INPUT]（0=关闭） |
+| AGENT_AUTO_SECRETS | 1 | 自动收集环境变量中疑似凭据（变量名含 KEY/SECRET/TOKEN/…） |
 | AGENT_HUB_URL | http://127.0.0.1:9000 | skill/CLI 的 Hub 地址 |
 | AGENT_PUBLIC_IP | 自动探测 | 显式指定公网 IP |
 | AGENT_REQUIRE_REGISTERED | 0 | 1=仅接受已注册握手 |

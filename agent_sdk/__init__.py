@@ -32,8 +32,9 @@ from . import security
 from .pricing import CostEstimator, PricingEngine, AutoPricer
 from .subscription import SubscriptionStore, create_sub_token, verify_sub_token
 from .security import guard_outbound, mark_untrusted, collect_own_secrets, PROMPT_GUARD_TEMPLATE
+from .security import mark_inputs_auto, unmark_input, collect_env_secrets
 
-__version__ = "0.4.0"
+__version__ = "0.5.0"
 __all__ = [
     "HubClient", "AgentServer", "KeyPair", "Session", "GroupSession",
     "Wallet", "WalletSignerServer", "WalletSignerClient", "HubError",
@@ -41,5 +42,6 @@ __all__ = [
     "CostEstimator", "PricingEngine", "AutoPricer",
     "SubscriptionStore", "create_sub_token", "verify_sub_token",
     "guard_outbound", "mark_untrusted", "collect_own_secrets", "PROMPT_GUARD_TEMPLATE",
+    "mark_inputs_auto", "unmark_input", "collect_env_secrets",
     "make_handshake", "responder_session", "initiator_session",
 ]

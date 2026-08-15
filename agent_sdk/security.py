@@ -80,10 +80,29 @@ def redact_secrets(text: str) -> tuple[str, list[tuple[str, str]]]:
 # 自身凭据收集（零误报拦截的基础：精确匹配自己持有的 secret）
 # ---------------------------------------------------------------------------
 
-def collect_own_secrets(wallet, keys, extra: list[str] | None = None) -> list[str]:
-    """收集 SDK 持有的敏感凭据：钱包私钥、加密密钥私钥、token 等。
+# 环境变量名启发式：含这些词的值自动视为凭据纳入保护（自主形成，无需人配置）
+SECRET_ENV_NAME_RE = re.compile(
+    r"(KEY|SECRET|TOKEN|PASSWORD|PASSWD|PRIVATE|MNEMONIC|SEED|CREDENTIAL|AUTH)", re.I)
+
+
+def collect_env_secrets(environ: dict | None = None) -> list[str]:
+    """自动收集环境变量中疑似凭据的值（变量名含 KEY/SECRET/TOKEN/…）。
+
+    这样 Agent 只要把密钥放进环境变量（业界惯例），SDK 自动纳入出站防护，
+    无需任何业务代码参与。AGENT_AUTO_SECRETS=0 可关闭。
+    """
+    if os.environ.get("AGENT_AUTO_SECRETS", "1") == "0":
+        return []
+    env = environ if environ is not None else os.environ
+    return [v for k, v in env.items() if v and SECRET_ENV_NAME_RE.search(k)]
+
+
+def collect_own_secrets(wallet, keys, extra: list[str] | None = None,
+                        include_env: bool = True) -> list[str]:
+    """收集 SDK 持有的敏感凭据：钱包私钥、加密密钥私钥、token、环境变量密钥。
 
     wallet 可能是 WalletSignerClient（无 private_hex 属性）→ getattr 兜底。
+    include_env=True（默认）：自动纳入环境变量中疑似凭据（自主形成）。
     """
     secrets: list[str] = []
     priv = getattr(wallet, "private_hex", None) or ""
@@ -99,6 +118,8 @@ def collect_own_secrets(wallet, keys, extra: list[str] | None = None) -> list[st
     for s in (extra or []):
         if s:
             secrets.append(s)
+    if include_env:
+        secrets.extend(collect_env_secrets())
     # 去重（保序）
     seen, out = set(), []
     for s in secrets:
@@ -196,7 +217,7 @@ def guard_outbound(payload, known_secrets: list[str] | None = None,
 
 
 # ---------------------------------------------------------------------------
-# 不可信输入标记（防 prompt 注入诱导）
+# 不可信输入标记（防 prompt 注入诱导）—— SDK 自动打标，无需业务代码调用
 # ---------------------------------------------------------------------------
 
 UNTRUSTED_OPEN = "[UNTRUSTED_INPUT]"
@@ -216,6 +237,28 @@ PROMPT_GUARD_TEMPLATE = (
 def mark_untrusted(text: str) -> str:
     """把外部输入包上不可信标记（交给 LLM/业务前调用）。"""
     return f"{UNTRUSTED_OPEN}{text}{UNTRUSTED_CLOSE}"
+
+
+def unmark_input(text: str) -> str:
+    """去除不可信标记，还原原始文本（业务需要原始值时）。"""
+    if text.startswith(UNTRUSTED_OPEN) and text.endswith(UNTRUSTED_CLOSE):
+        return text[len(UNTRUSTED_OPEN):-len(UNTRUSTED_CLOSE)]
+    return text
+
+
+def mark_inputs_auto(payload):
+    """自动给外部输入打标（递归：dict/list 中所有字符串值包上不可信标记）。
+
+    server 在调用业务回调前自动执行（AGENT_MARK_INPUTS 默认 1），
+    LLM 驱动的 Agent 无需任何代码即可获得防注入标记。
+    """
+    if isinstance(payload, str):
+        return mark_untrusted(payload) if payload else payload
+    if isinstance(payload, dict):
+        return {k: mark_inputs_auto(v) for k, v in payload.items()}
+    if isinstance(payload, list):
+        return [mark_inputs_auto(v) for v in payload]
+    return payload
 
 
 def is_untrusted_marked(text: str) -> bool:
