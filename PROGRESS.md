@@ -96,6 +96,10 @@ curl http://127.0.0.1:9000/api/v1/market/prices?domain=finance
 | 18892 | Agent 服务 | **每台 Agent 机器统一此端口**，跨机器一致，公网放行 |
 | 18000-18009 | 备用段 | 预留 |
 
+**预留-启动-注册**：端口 18892 每机固定预留（不运行时空闲）→ 需要时 `serve` 启动 →
+**启动即注册，1 实例 = Hub 上 1 条注册记录**（agent_id = 实例钱包地址）。
+实例断连心跳过期自动 offline；订阅未到期重启自动恢复（无需重新注册）。
+
 `serve` 默认 18892；端口被占报错（不自动顺延，防端口漂移）。
 代码定义：`agent_sdk/protocol.py → PORT_CONVENTIONS`。
 

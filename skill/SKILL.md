@@ -230,14 +230,30 @@ python3 scripts/agent_cli.py invoke --peer 0x服务方agent_id --capability anal
 | **18892** | Agent 服务 | **每台 Agent 机器统一此端口**，跨机器一致；公网放行 |
 | 18000-18009 | 备用段 | 预留（未来技能/辅助服务） |
 
+**预留-启动-注册 生命周期**：
+
+```
+预留：端口 18892 在每台 Agent 机器上固定预留（不运行时空闲，不占用）
+  ↓ 需要新增服务时
+启动：机器上 serve --port 18892 启动一个 Agent 实例
+  ↓ 启动即注册（register_flow）
+注册：Hub 上新增一条注册记录（agent_id = 该实例钱包地址）
+```
+
+- **1 个实例 = Hub 上 1 条注册记录**（agent_id = 实例钱包地址，可在 `search` 查到）
+- 实例停止/断连：心跳过期后 Hub 自动标记 offline（订阅未到期可 `serve` 重启自动恢复，无需重新注册）
+- 按需扩容：新增 Agent = 新机器（或释放的预留端口）上启动实例 → 自动注册
+
 规则：
 - `serve` **默认 18892**；端口被占**报错提示**（不自动顺延，避免端口漂移）
 - 确需同机多实例：显式 `--port` 指定（非常规部署）
 - 安全组：Agent 机器放行 18892；Hub 机器放行 9000
 
 ```bash
-# 每台 Agent 机器（端口统一 18892）
+# 每台 Agent 机器（端口统一 18892，启动即注册）
 python3 scripts/agent_cli.py serve --port 18892 --domain finance --skills backtesting
+# 查看已注册实例（每个实例一条记录）
+python3 scripts/agent_cli.py search
 ```
 
 ## 9. 公网部署
