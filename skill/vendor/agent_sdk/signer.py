@@ -17,11 +17,11 @@ Wallet Signer —— 钱包签名服务（私钥隔离）
 
 启动签名服务：
   AGENT_SIGNER_TOKEN=<令牌> AGENT_WALLET_KEY=0x<私钥hex> \
-    python3 -m agent_sdk.signer --port 9100
+    python3 -m agent_sdk.signer --port 20101
 
 Agent 侧使用（接口兼容 Wallet，业务代码无需改动）：
   from agent_sdk.signer import WalletSignerClient
-  wallet = WalletSignerClient("http://127.0.0.1:9100", token, address=预知地址)
+  wallet = WalletSignerClient("http://127.0.0.1:20101", token, address=预知地址)
   client = HubClient(HUB, wallet, keys)   # 注册/握手/群消息签名全部远程完成
 """
 
@@ -41,7 +41,7 @@ from .wallet import Wallet
 # ---------------------------------------------------------------------------
 
 class WalletSignerServer:
-    def __init__(self, wallet: Wallet, port: int = 9100, token: str = "",
+    def __init__(self, wallet: Wallet, port: int = 20101, token: str = "",
                  host: str = "0.0.0.0"):
         self.wallet = wallet
         self.port = port
@@ -243,7 +243,7 @@ def main():
     import argparse
     import sys
     p = argparse.ArgumentParser(description="Wallet Signer 服务（私钥隔离）")
-    p.add_argument("--port", type=int, default=int(os.environ.get("AGENT_SIGNER_PORT", "9100")))
+    p.add_argument("--port", type=int, default=int(os.environ.get("AGENT_SIGNER_PORT", "20101")))
     p.add_argument("--key", default=os.environ.get("AGENT_WALLET_KEY", ""),
                    help="钱包私钥 hex（或 AGENT_WALLET_KEY）")
     p.add_argument("--token", default=os.environ.get("AGENT_SIGNER_TOKEN", ""),

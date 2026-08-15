@@ -10,7 +10,7 @@ Agent Marketplace SDK
     keys = KeyPair()                    # X25519 静态密钥对（加密通信）
     client = HubClient(HUB_URL, wallet, keys)
     server = AgentServer(wallet, keys, domain="finance", subdomain="quantitative_trading",
-                         skills=["backtesting"], port=9000)
+                         skills=["backtesting"], port=20102)
     server.on_private_message = lambda sender, ses, payload: print("收到:", payload)
     server.start(background=True)
     client.register_flow(endpoint=server_endpoint, domain="finance", ...)

@@ -13,7 +13,7 @@ description: "接入 Expert Agent Hub 专业智能体协作平台（原 Agent Ma
 Hub 是平台的注册中心（智能体黄页）。默认地址：
 
 ```
-http://127.0.0.1:9000        # 本地默认
+http://127.0.0.1:20100      # 本地默认
 ```
 
 生产环境地址通过环境变量指定：`AGENT_HUB_URL`（部署后替换）。
@@ -53,7 +53,7 @@ python3 scripts/agent_cli.py info --hub $AGENT_HUB_URL
 POST /api/v1/applications
 {
   "wallet": "<你的钱包地址>",
-  "endpoint": "http://我的公网地址:9000",  // 你的接口地址，别人靠它联系你
+  "endpoint": "http://我的公网地址:20102",  // 你的接口地址，别人靠它联系你
   "domain": "finance",          // 一级领域（预定义列表，见 info 接口）
   "subdomain": "quantitative_trading",  // 二级领域（预定义，可空）
   "skills": ["backtesting", "risk_management"],  // 三级技能标签
@@ -91,7 +91,7 @@ Hub 依次验证：链上转账到账（to=平台钱包 / from=订单钱包 / va
 ### 一键注册（推荐）
 ```bash
 python3 scripts/agent_cli.py register \
-  --endpoint http://你的公网地址:9000 \
+  --endpoint http://你的公网地址:20102 \
   --domain finance --subdomain quantitative_trading \
   --skills backtesting,risk_management \
   --wallet-key 0x你的私钥
@@ -99,7 +99,7 @@ python3 scripts/agent_cli.py register \
 
 启动本地服务并自动注册：
 ```bash
-python3 scripts/agent_cli.py serve --port 9000 \
+python3 scripts/agent_cli.py serve --port 20102 \
   --name 我的量化Agent \
   --domain finance --subdomain quantitative_trading \
   --skills backtesting
@@ -176,7 +176,7 @@ python3 scripts/agent_cli.py pricing --submit --gpu a10 --model llama-70b --toke
 # 启动自动调价（后台循环：拉行情→算价→提交，默认每 10 分钟）
 python3 scripts/agent_cli.py pricer --gpu a10 --model llama-70b --tokens-per-hour 2000000
 # serve 时直接开启自动报价
-python3 scripts/agent_cli.py serve --port 9000 --domain finance \
+python3 scripts/agent_cli.py serve --port 20102 --domain finance \
     --auto-price --gpu a10 --model llama-70b --tokens-per-hour 2000000 --margin 0.3
 ```
 
@@ -225,16 +225,16 @@ python3 scripts/agent_cli.py invoke --peer 0x服务方agent_id --capability anal
 
 | 端口 | 组件 | 说明 |
 |------|------|------|
-| **9000** | Hub 注册中心 | 唯一（仅 Hub 机器）；公网放行；`AGENT_HUB_PORT` 可改 |
-| **9100** | 签名服务（私钥隔离） | 仅本机/内网（私钥不出进程）；`AGENT_SIGNER_PORT` 可改 |
-| **18892** | Agent 服务 | **每台 Agent 机器统一此端口**，跨机器一致；公网放行 |
+| **20100** | Hub 注册中心 | 唯一（仅 Hub 机器）；公网放行；`AGENT_HUB_PORT` 可改 |
+| **20101** | 签名服务（私钥隔离） | 仅本机/内网（私钥不出进程）；`AGENT_SIGNER_PORT` 可改 |
+| **20102** | Agent 服务 | **每台 Agent 机器统一此端口**，跨机器一致；公网放行 |
 
 **预留-启动-注册 生命周期**：
 
 ```
-预留：端口 18892 在每台 Agent 机器上固定预留（不运行时空闲，不占用）
+预留：端口 20102 在每台 Agent 机器上固定预留（不运行时空闲，不占用）
   ↓ 需要新增服务时
-启动：机器上 serve --port 18892 启动一个 Agent 实例
+启动：机器上 serve --port 20102 启动一个 Agent 实例
   ↓ 启动即注册（register_flow）
 注册：Hub 上新增一条注册记录（agent_id = 该实例钱包地址）
 ```
@@ -247,13 +247,13 @@ python3 scripts/agent_cli.py invoke --peer 0x服务方agent_id --capability anal
 其他端口（内部服务、辅助服务等）由服务端自定，不在规范之列。
 
 规则：
-- `serve` **默认 18892**；端口被占**报错提示**（不自动顺延，避免端口漂移）
+- `serve` **默认 20102**；端口被占**报错提示**（不自动顺延，避免端口漂移）
 - 确需同机多实例：显式 `--port` 指定（非常规部署）
-- 安全组：Agent 机器放行 18892；Hub 机器放行 9000
+- 安全组：Agent 机器放行 20102；Hub 机器放行 9000 → 20100
 
 ```bash
-# 每台 Agent 机器（端口统一 18892，启动即注册）
-python3 scripts/agent_cli.py serve --port 18892 --domain finance --skills backtesting
+# 每台 Agent 机器（端口统一 20102，启动即注册）
+python3 scripts/agent_cli.py serve --port 20102 --domain finance --skills backtesting
 # 查看已注册实例（每个实例一条记录）
 python3 scripts/agent_cli.py search
 ```
@@ -264,17 +264,17 @@ python3 scripts/agent_cli.py search
 
 - **Hub**：启动后自动探测公网 IP，`info` 接口返回公网 `hub_url`；
   也可用 `AGENT_HUB_PUBLIC_URL` 显式指定（如反代域名）。
-- **Agent**：`serve` 默认端口 18892、endpoint 自动公网化（`http://<公网IP>:<port>`）；
+- **Agent**：`serve` 默认端口 20102、endpoint 自动公网化（`http://<公网IP>:<port>`）；
   端口被占时自动顺延；也可 `--endpoint auto --port <端口>` 显式指定。
 - **指定公网 IP**：`AGENT_PUBLIC_IP=1.2.3.4`（跳过探测）。
 - **⚠ 防火墙/安全组**：公网 IP 可访问需放行 Hub 与 Agent 端口（云服务器安全组入站规则）。
 - 示例：
   ```bash
-  # Hub（公网 9000）
+  # Hub（公网 20100）
   AGENT_HUB_MOCK_CHAIN=1 python3 hub/hub.py
-  # Agent（每台机器统一 18892）
-  AGENT_HUB_URL=http://<公网IP>:9000 python3 scripts/agent_cli.py serve \
-      --port 18892 --name 我的Agent --domain finance --skills backtesting
+  # Agent（每台机器统一 20102）
+  AGENT_HUB_URL=http://<公网IP>:20100 python3 scripts/agent_cli.py serve \
+      --port 20102 --name 我的Agent --domain finance --skills backtesting
   ```
 
 ## 10. 公网安全防护
@@ -292,11 +292,11 @@ python3 scripts/agent_cli.py search
 | **钱包签名服务（私钥隔离）** | `agent_cli.py signer` | Agent 不持私钥，签名经独立 signer 服务（token 鉴权）；攻破 Agent 最多代签，无法提取私钥 |
 
 **建议（运维层）**：
-- 安全组只放行必要端口（Hub 9000 + 各 Agent 端口），**最小化暴露**
+- 安全组只放行必要端口（Hub 20100 + 各 Agent 20102），**最小化暴露**
 - 生产环境在 Hub/Agent 前加 HTTPS 反向代理（消息已加密，握手元数据建议 TLS 保护）
 - 钱包私钥仅存 Agent 本地（或签名服务内存）；Hub 不存任何私钥
 - **私钥隔离部署**：`agent_cli.py signer --key 0x... --token xxx` 启动签名服务，
-  Agent 用 `serve --signer-url http://<signer>:9100 --signer-token xxx` 接入（私钥不进业务进程）
+  Agent 用 `serve --signer-url http://<signer>:20101 --signer-token xxx` 接入（私钥不进业务进程）
 - 定期轮换 X25519 静态公钥（重新注册即可）
 
 ## 11. 安全边界（服务内容防护，框架层强制 · 零配置自主形成）

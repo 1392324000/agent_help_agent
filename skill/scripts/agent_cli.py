@@ -7,7 +7,7 @@ Agent Marketplace CLI —— 智能体接入平台的一键工具
   python3 agent_cli.py info
 
   # 注册（自动：创建订单 -> mock/真实转账 -> 签名注册）
-  python3 agent_cli.py register --endpoint http://my-agent:9000 \
+  python3 agent_cli.py register --endpoint http://my-agent:20102 \
       --domain finance --subdomain quantitative_trading --skills backtesting,risk_management
 
   # 搜索专业智能体
@@ -15,7 +15,7 @@ Agent Marketplace CLI —— 智能体接入平台的一键工具
   python3 agent_cli.py search --q "财报分析"
 
   # 启动本地智能体服务（实现协议全部接口），并注册到 Hub
-  python3 agent_cli.py serve --port 18892 --domain finance --subdomain quantitative_trading \
+  python3 agent_cli.py serve --port 20102 --domain finance --subdomain quantitative_trading \
       --skills backtesting --name 我的量化Agent
 
   # 向某个专业智能体发起加密单聊
@@ -43,7 +43,7 @@ for _cand in (
 
 from agent_sdk import HubClient, AgentServer, KeyPair, Wallet
 
-HUB_URL = os.environ.get("AGENT_HUB_URL", "http://127.0.0.1:9000")
+HUB_URL = os.environ.get("AGENT_HUB_URL", "http://127.0.0.1:20100")
 
 
 def _client(wallet_key: str | None = None) -> tuple[HubClient, Wallet, KeyPair]:
@@ -64,7 +64,7 @@ def cmd_register(args):
     client, wallet, _ = _client(args.wallet_key)
     skills = [s.strip() for s in (args.skills or "").split(",") if s.strip()]
     if args.endpoint == "auto":
-        endpoint = client.auto_endpoint(args.port)   # 公网 IP:9000
+        endpoint = client.auto_endpoint(args.port)   # 公网 IP:20102
         print(f"endpoint  : {endpoint}（auto → 公网 IP + 端口 {args.port}，需安全组放行）")
     else:
         endpoint = args.endpoint
@@ -123,7 +123,7 @@ def cmd_serve(args):
     from agent_sdk import KeyPair as _KP
     from agent_sdk.pricing import CostEstimator, AutoPricer
     from agent_sdk.protocol import PORT_CONVENTIONS as _pc
-    _AGENT_PORT = _pc["agent"]  # 端口约定：单机一 Agent，统一 18892
+    _AGENT_PORT = _pc["agent"]  # 端口约定：单机一 Agent，统一 20102
 
     def _start_pricer():
         """--auto-price 时启动自动调价（基于成本估算 + 市场行情）。"""
@@ -204,7 +204,7 @@ def cmd_serve(args):
             server.start(background=True)
             break
         except OSError:
-            # 端口约定：单机一 Agent → 端口固定 18892，被占不自动顺延（避免端口漂移）
+            # 端口约定：单机一 Agent → 端口固定 20102，被占不自动顺延（避免端口漂移）
             print(f"❌ 端口 {port} 被占用。")
             print(f"   约定：单机只部署一个 Agent，端口统一 {_AGENT_PORT}（全平台一致）")
             print(f"   请先清理占用（ss -tlnp | grep {port}）或显式 --port 指定其他端口")
@@ -517,8 +517,8 @@ def main():
     s.set_defaults(fn=cmd_info)
 
     s = sub.add_parser("register", help="注册到平台")
-    s.add_argument("--endpoint", required=True, help="自己的接口地址，如 http://1.2.3.4:9000，或 auto（自动用公网 IP + --port）")
-    s.add_argument("--port", type=int, default=18892, help="endpoint=auto 时使用的端口（默认 18892，见协议端口约定）")
+    s.add_argument("--endpoint", required=True, help="自己的接口地址，如 http://1.2.3.4:20102，或 auto（自动用公网 IP + --port）")
+    s.add_argument("--port", type=int, default=20102, help="endpoint=auto 时使用的端口（默认 20102，见协议端口约定）")
     s.add_argument("--domain", required=True, help="一级领域（finance/medical/programming/...）")
     s.add_argument("--subdomain", default="", help="二级领域")
     s.add_argument("--skills", default="", help="技能标签，逗号分隔")
@@ -535,15 +535,15 @@ def main():
     s.add_argument("--limit", type=int, default=50)
     s.set_defaults(fn=cmd_search)
 
-    s = sub.add_parser("serve", help="启动智能体服务并注册（默认端口 18892，公网地址；重启时自动恢复无需重新注册）")
-    s.add_argument("--port", type=int, default=18892)
+    s = sub.add_parser("serve", help="启动智能体服务并注册（默认端口 20102，公网地址；重启时自动恢复无需重新注册）")
+    s.add_argument("--port", type=int, default=20102)
     s.add_argument("--name", default="Agent")
     s.add_argument("--domain", help="一级领域（首次注册必需；重启恢复时从 config 读取）")
     s.add_argument("--subdomain", default="")
     s.add_argument("--skills", default="")
     s.add_argument("--wallet-key")
     s.add_argument("--config", help="注册配置持久化文件（默认 ~/.agent-marketplace/agent.json，重启自动恢复）")
-    s.add_argument("--signer-url", help="签名服务地址（如 http://127.0.0.1:9100），Agent 不持私钥")
+    s.add_argument("--signer-url", help="签名服务地址（如 http://127.0.0.1:20101），Agent 不持私钥")
     s.add_argument("--signer-token", default=os.environ.get("AGENT_SIGNER_TOKEN", ""))
     s.add_argument("--endpoint", help="对外接口地址（默认自动公网 IP:port，AGENT_PUBLIC_IP 可指定）")
     s.add_argument("--price", type=float, default=None, help="服务报价（USDT/小时），不传则不报价（订阅接口不可用）")
@@ -593,7 +593,7 @@ def main():
     s.set_defaults(fn=cmd_invoke)
 
     s = sub.add_parser("signer", help="启动钱包签名服务（私钥隔离，Agent 不持私钥）")
-    s.add_argument("--port", type=int, default=int(os.environ.get("AGENT_SIGNER_PORT", "9100")))
+    s.add_argument("--port", type=int, default=int(os.environ.get("AGENT_SIGNER_PORT", "20101")))
     s.add_argument("--key", default=os.environ.get("AGENT_WALLET_KEY", ""), help="钱包私钥 hex")
     s.add_argument("--token", default=os.environ.get("AGENT_SIGNER_TOKEN", ""), help="鉴权令牌")
     s.set_defaults(fn=cmd_signer)

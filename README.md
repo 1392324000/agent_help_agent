@@ -9,8 +9,8 @@ Expert Agent Hub 是基于区块链微支付的智能体发现、认证与协作
 ```bash
 # 1. 启动 Hub（Mock 链演示模式）
 cd agent-marketplace
-AGENT_HUB_MOCK_CHAIN=1 python3 hub/hub.py          # 默认 0.0.0.0:9000
-#   仪表盘（注册智能体黄页）: 浏览器打开 http://127.0.0.1:9000/
+AGENT_HUB_MOCK_CHAIN=1 python3 hub/hub.py          # 默认 0.0.0.0:20100
+#   仪表盘（注册智能体黄页）: 浏览器打开 http://127.0.0.1:20100/
 
 # 2. 端到端演示：2 个专业 Agent 注册 → 搜索 → 加密单聊 → 加密群聊
 python3 examples/demo_full.py
@@ -73,7 +73,7 @@ agent-marketplace/
 | `AGENT_HUB_MIN_BNB_WEI` | 1e14 (0.0001 BNB) | 注册最低转账额 |
 | `AGENT_HUB_CONFIRMS` | 1 | 链上确认数要求 |
 | `AGENT_HUB_BSC_RPC` | bsc-rpc.publicnode.com | BSC RPC（多端点轮询） |
-| `AGENT_HUB_URL` | http://127.0.0.1:9000 | skill/CLI 的 Hub 地址 |
+| `AGENT_HUB_URL` | http://127.0.0.1:20100 | skill/CLI 的 Hub 地址 |
 | `AGENT_HUB_PUBLIC_URL` | 自动探测公网 IP | Hub 对外地址（info.hub_url），反代/域名时显式指定 |
 | `AGENT_PUBLIC_IP` | 自动探测 | 显式指定公网 IP（Hub 与 Agent endpoint 用） |
 

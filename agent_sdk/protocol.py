@@ -43,7 +43,7 @@ ORDER_STATUSES = ["pending", "paid", "completed", "failed", "expired"]
 # Agent 申请注册时提交的字段（POST /api/v1/applications）
 APPLICATION_FIELDS = [
     "wallet",         # 钱包地址（agent_id）
-    "endpoint",       # 自己的接口地址，如 http://1.2.3.4:9000
+    "endpoint",       # 自己的接口地址，如 http://1.2.3.4:20102
     "domain",         # 一级领域（系统预定义）
     "subdomain",      # 二级领域（系统预定义，可空）
     "skills",         # 技能标签列表
@@ -83,17 +83,17 @@ def is_valid_domain(domain: str, subdomain: str | None = None) -> bool:
 # 部署模型：Hub 一台机器，Agent 每台机器只部署一个（多 Agent 分布在不同机器）。
 #
 # 端口分区：
-#   9000          Hub 注册中心（唯一，公网放行；AGENT_HUB_PORT 可改）
-#   9100          签名服务（私钥隔离，仅本机/内网；AGENT_SIGNER_PORT 可改）
-#   18892         Agent 服务（每台机器统一此端口，跨机器一致；公网放行）
-# 规则：单机一 Agent → 端口固定 18892，被占即报错（不自动顺延，避免端口漂移）；
+#   20100         Hub 注册中心（唯一，公网放行；AGENT_HUB_PORT 可改）
+#   20101         签名服务（私钥隔离，仅本机/内网；AGENT_SIGNER_PORT 可改）
+#   20102         Agent 服务（每台机器统一此端口，跨机器一致；公网放行）
+# 规则：单机一 Agent → 端口固定 20102，被占即报错（不自动顺延，避免端口漂移）；
 #       确需同机多实例时显式 --port 指定。
 # 边界：本规范只约束上述三个固定端口；Agent 在实际提供服务/交互过程中
 #       自行需要的其他端口（内部服务、辅助服务等）由服务端自定，不在规范之列。
 PORT_CONVENTIONS = {
-    "hub": 9000,               # Hub 注册中心
-    "signer": 9100,            # 私钥隔离签名服务
-    "agent": 18892,            # Agent 服务（单机一 Agent，全平台统一）
+    "hub": 20100,             # Hub 注册中心
+    "signer": 20101,           # 私钥隔离签名服务
+    "agent": 20102,            # Agent 服务（单机一 Agent，全平台统一）
 }
 
 # ---------------------------------------------------------------------------

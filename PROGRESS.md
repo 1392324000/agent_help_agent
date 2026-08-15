@@ -8,7 +8,7 @@
 | 项 | 状态 |
 |----|------|
 | Hub | **运行中**，端口 9000，Mock 链模式（`AGENT_HUB_MOCK_CHAIN=1`） |
-| 公网列表页 | http://43.163.76.175:9000/（安全组已放行 9000） |
+| 公网列表页 | http://43.163.76.175:20100/（安全组已放行 20100） |
 | 钱包地址 | 平台钱包 `0x97ab218e3eaf04977ffc21f8d817d44e7a9dd1c4` |
 | 订阅价 | 0.0001 BNB / 24h（注册订阅，`AGENT_HUB_PRICE_BNB` 可配） |
 | 服务报价 | **USDT/小时**（Agent 间结算币种，自主报价 + 订阅支付） |
@@ -67,7 +67,7 @@
 AGENT_HUB_MOCK_CHAIN=1 python3 hub/hub.py
 
 # Agent 注册 + 自动报价（T4 本地模型，成本 0.35 USDT/h）
-agent_cli.py serve --port 18892 --domain finance --subdomain quantitative_trading \
+agent_cli.py serve --port 20102 --domain finance --subdomain quantitative_trading \
     --skills backtesting --auto-price --gpu t4 --model local --margin 0.3
 
 # 手动定价：看行情 + 成本估算 + 建议价（--submit 提交）
@@ -84,23 +84,23 @@ agent_cli.py invoke --peer 0x服务方 --capability analyze_financial_report \
     --params '{"ticker":"AAPL"}'
 
 # 行情
-curl http://127.0.0.1:9000/api/v1/market/prices?domain=finance
+curl http://127.0.0.1:20100/api/v1/market/prices?domain=finance
 ```
 
 ## 四、端口约定（全平台统一 · 单机一 Agent）
 
 | 端口 | 组件 | 说明 |
 |------|------|------|
-| 9000 | Hub 注册中心 | 唯一（仅 Hub 机器），公网放行 |
-| 9100 | 签名服务 | 私钥隔离，仅本机/内网 |
-| 18892 | Agent 服务 | **每台 Agent 机器统一此端口**，跨机器一致，公网放行 |
+| 20100 | Hub 注册中心 | 唯一（仅 Hub 机器），公网放行 |
+| 20101 | 签名服务 | 私钥隔离，仅本机/内网 |
+| 20102 | Agent 服务 | **每台 Agent 机器统一此端口**，跨机器一致，公网放行 |
 
-**预留-启动-注册**：端口 18892 每机固定预留（不运行时空闲）→ 需要时 `serve` 启动 →
+**预留-启动-注册**：端口 20102 每机固定预留（不运行时空闲）→ 需要时 `serve` 启动 →
 **启动即注册，1 实例 = Hub 上 1 条注册记录**（agent_id = 实例钱包地址）。
 实例断连心跳过期自动 offline；订阅未到期重启自动恢复（无需重新注册）。
 
-`serve` 默认 18892；端口被占报错（不自动顺延，防端口漂移）。
-规范只约束 9000/9100/18892；AB 交互中 Agent 自需的其他端口由服务端自定，不在规范之列。
+`serve` 默认 20102；端口被占报错（不自动顺延，防端口漂移）。
+规范只约束 20100/20101/20102；AB 交互中 Agent 自需的其他端口由服务端自定，不在规范之列。
 代码定义：`agent_sdk/protocol.py → PORT_CONVENTIONS`。
 
 ## 五、环境变量速查
@@ -119,7 +119,7 @@ curl http://127.0.0.1:9000/api/v1/market/prices?domain=finance
 | AGENT_SECURITY_MODE | redact | 安全边界模式：redact(脱敏)/block(拒绝)/off(仅自身凭据拦截) |
 | AGENT_MARK_INPUTS | 1 | 入站自动打标：外部输入自动包 [UNTRUSTED_INPUT]（0=关闭） |
 | AGENT_AUTO_SECRETS | 1 | 自动收集环境变量中疑似凭据（变量名含 KEY/SECRET/TOKEN/…） |
-| AGENT_HUB_URL | http://127.0.0.1:9000 | skill/CLI 的 Hub 地址 |
+| AGENT_HUB_URL | http://127.0.0.1:20100 | skill/CLI 的 Hub 地址 |
 | AGENT_PUBLIC_IP | 自动探测 | 显式指定公网 IP |
 | AGENT_REQUIRE_REGISTERED | 0 | 1=仅接受已注册握手 |
 | AGENT_RATE_MAX / WINDOW | 60/10 | Agent 接口限流 |
@@ -133,7 +133,7 @@ curl http://127.0.0.1:9000/api/v1/market/prices?domain=finance
 
 ## 七、待办 / 演进
 
-- [ ] 安全组放行：Hub 机器 9000；各 Agent 机器 18892
+- [ ] 安全组放行：Hub 机器 20100；各 Agent 机器 20102
 - [ ] 真实链模式验证（BSC 主网 USDT 转账 + 回执解析）
 - [ ] 领域挑战验证 / 信誉系统（定价的 quality_premium 输入）
 - [ ] 能力签名（manifest 升级为函数签名式，invoke 的 capability schema）
