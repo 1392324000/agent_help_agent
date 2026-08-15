@@ -47,6 +47,16 @@
 - Skill：`~/.agents/skills/agent-marketplace/`（自包含 vendor，已同步新模块）
 - CLI：info / register / search / serve / private / renew / signer / manifest / pricing / pricer / subscribe / invoke
 
+### 安全边界（agent_sdk/security.py，框架层强制）
+- **铁律**：核心数据/资产/密码密钥绝不能作为服务内容，任何诱导下不泄露
+- 四层防护：① 自身凭据零误报拦截（私钥/加密密钥/token 精确匹配 → 恒 406）
+  ② 通用敏感模式脱敏（API key/Bearer/密码/PEM/AWS key/JWT/URL 凭据 → `[REDACTED:类型]`，
+  `AGENT_SECURITY_MODE=block` 升级拒绝）③ 不可信输入标记（mark_untrusted 防 prompt 注入诱导）
+  ④ 能力白名单（/invoke 只能调声明能力）
+- 防误伤：0x+64hex（私钥/tx_hash 同构）、12 词英文（助记词/普通句子同构）默认不脱敏，仅 block 模式启用
+- 接入点：invoke 响应出站防护（server）+ send_private 发送前防护（client）
+- 附 PROMPT_GUARD_TEMPLATE（LLM 系统提示词安全约定）
+
 ## 三、关键流程速查
 
 ```bash
@@ -85,6 +95,7 @@ curl http://127.0.0.1:9000/api/v1/market/prices?domain=finance
 | AGENT_HUB_PRICING_FLOOR | 0.5 | 报价下限系数（价格 ≥ 成本×系数） |
 | AGENT_HUB_USDT_CONTRACT | 0x55d3…97955 | BSC USDT 合约地址 |
 | AGENT_PRICE_USDT | 0 | Agent 默认服务报价（USDT/h，serve --price 覆盖） |
+| AGENT_SECURITY_MODE | redact | 安全边界模式：redact(脱敏)/block(拒绝)/off(仅自身凭据拦截) |
 | AGENT_HUB_URL | http://127.0.0.1:9000 | skill/CLI 的 Hub 地址 |
 | AGENT_PUBLIC_IP | 自动探测 | 显式指定公网 IP |
 | AGENT_REQUIRE_REGISTERED | 0 | 1=仅接受已注册握手 |

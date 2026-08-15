@@ -365,9 +365,18 @@ class HubClient:
         return session
 
     def send_private(self, session: Session, text: str) -> dict:
-        """发送加密消息到对方 /channel/message。"""
+        """发送加密消息到对方 /channel/message。
+
+        🔒 安全边界：发送前对内容做脱敏（自身凭据恒拦截），防止被诱导后外泄。
+        """
+        from .security import guard_outbound, collect_own_secrets
+        guard = guard_outbound(text, collect_own_secrets(self.wallet, self.keys))
+        if guard.blocked:
+            raise HubError(f"安全边界：{guard.reason}")
+        if guard.hits:
+            print(f"[send] ⚠ 消息包含敏感模式，已脱敏: {sorted({t for t, _ in guard.hits})}")
         peer = self.get_agent(session.peer)
-        env = session.encrypt_text(text)
+        env = session.encrypt_text(guard.payload)
         return _post(f"{peer['endpoint'].rstrip('/')}{protocol.AGENT_ENDPOINTS['channel_message']}", env)
 
     # ------------------------------------------------------------------

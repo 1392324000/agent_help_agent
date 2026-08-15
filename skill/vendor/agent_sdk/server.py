@@ -28,6 +28,7 @@ from .crypto import (KeyPair, Session, GroupSession, responder_session, b64d)
 from .wallet import Wallet, recover_address_from_signature
 from . import protocol
 from .subscription import (SubscriptionStore, create_sub_token, verify_sub_token)
+from .security import guard_outbound, collect_own_secrets
 
 # 安全配置（环境变量可调）
 MAX_BODY_BYTES = int(__import__("os").environ.get("AGENT_MAX_BODY_BYTES", "1048576"))   # 请求体上限 1MB
@@ -103,6 +104,11 @@ class AgentServer:
         self.price_usdt_per_hour = max(0.0, float(
             price_usdt_per_hour if price_usdt_per_hour is not None
             else __import__("os").environ.get("AGENT_PRICE_USDT", "0")))
+
+        # ---- 安全边界：出站防护（自身凭据恒拦截，通用模式按 security_mode） ----
+        self.security_mode = (__import__("os").environ
+                              .get("AGENT_SECURITY_MODE", "redact").strip().lower())
+        self._known_secrets = collect_own_secrets(wallet, keys)
 
         # 业务回调（由 Agent 自定义）
         self.on_private_message = None  # fn(sender_id, session, payload)
@@ -525,9 +531,17 @@ class AgentServer:
                         return self._send(500, {"ok": False, "error": f"能力执行失败: {e}"})
                     if result is None:
                         return self._send(404, {"ok": False, "error": f"未知能力 {capability}"})
-                    return self._send(200, {"ok": True, "result": result,
+                    # 🔒 安全边界：出站防护（自身凭据恒拦截；通用敏感模式按 security_mode 脱敏/拒绝）
+                    guard = guard_outbound(result, owner._known_secrets, owner.security_mode)
+                    if guard.blocked:
+                        print(f"[{owner.name}] ⛔ 安全边界拦截 invoke 响应"
+                              f"（{guard.reason}）")
+                        return self._send(406, {"ok": False, "error": f"安全边界：{guard.reason}",
+                                                "guard": [t for t, _ in guard.hits]})
+                    return self._send(200, {"ok": True, "result": guard.payload,
                                             "subscriber": payload["sub"],
-                                            "expires_at": payload["exp"]})
+                                            "expires_at": payload["exp"],
+                                            "guard": [t for t, _ in guard.hits] or None})
 
                 self._send(404, {"ok": False, "error": f"未知接口 {path}"})
 

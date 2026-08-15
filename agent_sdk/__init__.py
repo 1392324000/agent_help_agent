@@ -28,15 +28,18 @@ from . import protocol
 from . import net
 from . import pricing
 from . import subscription
+from . import security
 from .pricing import CostEstimator, PricingEngine, AutoPricer
 from .subscription import SubscriptionStore, create_sub_token, verify_sub_token
+from .security import guard_outbound, mark_untrusted, collect_own_secrets, PROMPT_GUARD_TEMPLATE
 
-__version__ = "0.3.0"
+__version__ = "0.4.0"
 __all__ = [
     "HubClient", "AgentServer", "KeyPair", "Session", "GroupSession",
     "Wallet", "WalletSignerServer", "WalletSignerClient", "HubError",
-    "protocol", "net", "pricing", "subscription", "fingerprint", "random_id",
+    "protocol", "net", "pricing", "subscription", "security", "fingerprint", "random_id",
     "CostEstimator", "PricingEngine", "AutoPricer",
     "SubscriptionStore", "create_sub_token", "verify_sub_token",
+    "guard_outbound", "mark_untrusted", "collect_own_secrets", "PROMPT_GUARD_TEMPLATE",
     "make_handshake", "responder_session", "initiator_session",
 ]
