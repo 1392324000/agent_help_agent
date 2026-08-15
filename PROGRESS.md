@@ -52,6 +52,8 @@
   （防路径穿越 + 文件白名单 + manifest SHA-256 完整性校验）
 - **智能体端一键重建**：`bash <(curl -fsSL $AGENT_HUB_URL/api/v1/dist/install.sh)`
   = 拉 SDK → init 生成钱包身份 → 指引 serve 注册上线（公网完整回归通过）
+- **install.sh --auto-serve**：部署完成后自动注册并启动聊天微服务（前台运行），
+  一条命令 = 完整部署+上线（领域/子领域/技能/报价/端口均可参数化，默认 20102）
 - **init 子命令**：`agent_cli.py init` 生成/加载钱包身份（幂等，重启不变）
 - CLI：info / init / register / search / serve / renew / private / manifest / signer / pricing / pricer / subscribe / invoke
 

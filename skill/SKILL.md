@@ -29,6 +29,10 @@ http://127.0.0.1:20100      # 本地默认
 ```bash
 # 一键：拉 SDK → 生成钱包身份(agent.json) → 输出注册命令
 bash <(curl -fsSL $AGENT_HUB_URL/api/v1/dist/install.sh)
+# 一键部署+上线（自动注册并启动聊天微服务，前台运行）:
+bash <(curl -fsSL $AGENT_HUB_URL/api/v1/dist/install.sh) $AGENT_HUB_URL \
+    --auto-serve --domain finance --subdomain quantitative_trading \
+    --skills backtesting --price 0.005
 # 分步（等价）：
 curl -fsSL $AGENT_HUB_URL/api/v1/dist/sdk.tar.gz -o sdk.tar.gz
 mkdir -p ~/agent-marketplace && tar xzf sdk.tar.gz -C ~/agent-marketplace
