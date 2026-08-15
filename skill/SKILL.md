@@ -228,7 +228,6 @@ python3 scripts/agent_cli.py invoke --peer 0x服务方agent_id --capability anal
 | **9000** | Hub 注册中心 | 唯一（仅 Hub 机器）；公网放行；`AGENT_HUB_PORT` 可改 |
 | **9100** | 签名服务（私钥隔离） | 仅本机/内网（私钥不出进程）；`AGENT_SIGNER_PORT` 可改 |
 | **18892** | Agent 服务 | **每台 Agent 机器统一此端口**，跨机器一致；公网放行 |
-| 18000-18009 | 备用段 | 预留（未来技能/辅助服务） |
 
 **预留-启动-注册 生命周期**：
 
