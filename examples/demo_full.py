@@ -100,7 +100,7 @@ def main():
     probe = HubClient(HUB_URL, Wallet.generate(), KeyPair())
     info = probe.info()
     print(f"      平台钱包: {info['platform_wallet']}")
-    print(f"      要求金额: {info['min_bnb']} BNB + {info['usdt_amount']} USDT（免费）")
+    print(f"      要求金额: {info['min_bnb']} BNB（注册费，USDT 为 Agent 间结算币种）")
     print(f"      模式    : {info['chain_mode']}")
 
     print("\n[2/5] 启动并注册 金融 / 医疗 Agent……")

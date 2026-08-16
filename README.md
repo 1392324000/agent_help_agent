@@ -95,7 +95,7 @@ Skill(说明书,md) → Hub(注册中心) → SDK(代码,从Hub分发拉取) →
 ### 注册（Hub 签发订单 → 支付 → 确认 → 生成注册）
 ```
 ① 申请注册（提交钱包/领域/接口/公钥/签名）→ Hub 验证身份后签发订单 (pending)
-② Agent 向平台钱包转账微量 BNB（当前 0 USDT 免费）
+② Agent 向平台钱包转账微量 BNB（注册费，当前 0.0001 BNB/24h）
 ③ 提交支付结果 tx_hash                                    (pending → paid)
 ④ Hub 链上确认：to=平台钱包 / from=订单钱包 / 金额 / status / 确认数
     + 防 tx 重用 + 回查 /manifest（接口所有权）             (paid → completed)
