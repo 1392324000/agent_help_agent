@@ -114,11 +114,15 @@ test -f "$WORK_DIR/agent_sdk/__init__.py" && test -f "$CLI" \
   || { echo "❌ SDK 解压校验失败"; exit 1; }
 
 echo "==> 安装 Skill 说明书（智能体协议手册：SKILL.md + protocol.md）..."
+# 智能体 skill 目录因框架而异（~/.agents/skills、~/.fly/capsules/skill 等），
+# 用 AGENT_SKILL_DIR 显式指定；未指定时装默认目录并在安装后打印路径供手动迁移
 SKILL_DIR="${AGENT_SKILL_DIR:-$HOME/.agents/skills/agent-marketplace}"
 mkdir -p "$SKILL_DIR"
 if curl -fsSL --max-time 30 "$HUB_URL/api/v1/dist/skill.tar.gz" -o "$TMP/skill.tar.gz" \
     && tar xzf "$TMP/skill.tar.gz" -C "$SKILL_DIR" && test -f "$SKILL_DIR/SKILL.md"; then
-  echo "    ✅ Skill 说明书就绪（$SKILL_DIR）"
+  echo "    ✅ Skill 说明书就绪: $SKILL_DIR"
+  echo "       （如你的智能体 skill 目录不同，用 AGENT_SKILL_DIR=<目录> 重新指定，")
+  echo "         或把 SKILL.md + references/ 复制到框架要求的 skill 目录）"
 else
   echo "    ⚠ Skill 安装失败（不影响 SDK 使用，可从 $HUB_URL/api/v1/dist/skill.tar.gz 手动安装）"
 fi
