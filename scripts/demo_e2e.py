@@ -22,8 +22,10 @@ import json
 
 # 演示 = mock 链：专家端订阅支付判定走 mock（模拟 USDT 转账），须在创建服务前设置
 os.environ.setdefault("AGENT_HUB_MOCK_CHAIN", "1")
-# 演示加速：token 有效期按 600 倍缩短（0.25h=900s→1.5s，金额不变），方便观察自动续购
+# 演示加速：token 有效期按 300 倍缩短（0.25h=900s→3s，金额不变），方便观察自动续购
 os.environ.setdefault("AGENT_SUB_DURATION_SCALE", "300")
+# 演示放宽限流（防刷默认 60/10s 会干扰并发演示；真实部署保持默认）
+os.environ.setdefault("AGENT_RATE_MAX", "500")
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -318,6 +320,10 @@ def main():
 
         # ---- ⑨ 并发隔离：同一专家同时服务多个客户，会话互不干扰 ----
         banner("⑨ 并发隔离：同一专家同时服务 2 个客户（各自 token/工作上下文，互不可见）")
+        # 甲乙都重新购买新鲜 token（前序阶段的 token 已近过期，避免时序干扰）
+        sub_a = buy_quarter()
+        token = sub_a["token"]
+        sub_b = None
         cust2 = HubClient(HUB_URL, Wallet.generate(), KeyPair())  # 客户乙
         sub_b = cust2.subscribe_to_peer(picked["agent_id"], QUARTER_HOURS)
         ok_all = True

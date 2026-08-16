@@ -107,8 +107,9 @@ def collect_own_secrets(wallet, keys, extra: list[str] | None = None,
     secrets: list[str] = []
     priv = getattr(wallet, "private_hex", None) or ""
     if priv and priv.startswith("0x") and len(priv) == 66:
-        secrets.append(priv)
-        secrets.append(priv[2:])            # 去 0x 前缀的裸 hex
+        bare = priv[2:]
+        # 私钥变体全覆盖（防业务返回格式变体绕过：去前缀/大小写/补零差异）
+        secrets += [priv, bare, priv.lower(), bare.lower(), bare.upper()]
     keys_priv = getattr(keys, "private_b64", None) or ""
     if keys_priv:
         secrets.append(keys_priv)
@@ -130,9 +131,13 @@ def collect_own_secrets(wallet, keys, extra: list[str] | None = None,
 
 
 def _contains_own(known: list[str], text: str) -> str | None:
-    """文本是否包含任一自身凭据的确切值。返回命中的凭据（截断展示）。"""
+    """文本是否包含任一自身凭据（大小写不敏感，防 hex 大小写变体绕过）。
+    返回命中的凭据（截断展示）。"""
+    tl = text.lower()
     for s in known:
-        if s and s in text:
+        if not s:
+            continue
+        if s in text or s.lower() in tl:
             return s[:8] + "…"
     return None
 
