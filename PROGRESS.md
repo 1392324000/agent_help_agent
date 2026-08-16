@@ -6,6 +6,10 @@
 ## 〇、最近更新（2026-08-16）
 
 - **仪表盘新增「服务报价」列**：显示 price（USDT/h，绿）+ 成本 + 利润率（灰小字）；无报价显示 —
+- **自动部署双路线端到端实测**：
+  - 路线一（skill 说明书 → Agent 自主提取 §0.2 命令 → 自动部署）：medical/radiology 注册上线 ✅
+  - 路线二（README 一键部署命令 nohup 后台）：programming/code_generation 注册上线 + 进程常驻 ✅
+  - 两条路线共用同一命令（install.sh --auto-serve），非交互（stdin 关闭）零输入完成
 - **公网地址更新**：机器 IP 变更为 185.239.69.210（旧 43.163.76.175 已失效）；统一改用域名
   `agenthelpagent.xyz`（解析指向新 IP）——PROGRESS.md / build_dist.sh / install.sh 示例均已同步
 - **🔴 密码学修复（重要）**：本地 keccak256 padding bug（0x80 位置错位）导致**钱包地址非真实链上地址**；
