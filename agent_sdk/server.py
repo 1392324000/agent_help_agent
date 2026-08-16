@@ -147,7 +147,7 @@ class AgentServer:
 
     def _get_verifier(self):
         if self._verifier is None:
-            from hub.chain_verify import ChainVerifier
+            from .chain_verify import ChainVerifier
             import os as _os
             self._verifier = ChainVerifier(
                 mock=_os.environ.get("AGENT_HUB_MOCK_CHAIN", "0") == "1")

@@ -463,6 +463,24 @@ def cmd_serve(args):
             print(f"[pricer] ⚠ 首次调价失败: {e}")
         return pricer
 
+    def _submit_initial_price():
+        """--price 且未 --auto-price：把标价主动提交到 Hub（搜索展示，供 B 选前查看）。"""
+        if not args.price or args.auto_price:
+            return
+        try:
+            cost_est = CostEstimator(gpu=args.gpu, model=args.model,
+                                     tokens_per_hour=args.tokens_per_hour,
+                                     data_cost=args.data_cost, fixed_cost=args.fixed_cost,
+                                     hardware_cost=args.hardware_cost)
+            cost = cost_est.estimate()
+            resp = client.submit_pricing(cost, args.price, profit_margin=args.margin)
+            if resp.get("ok"):
+                print(f"[pricer] 已提交标价 {args.price} USDT/h 到 Hub（成本估算 {cost} USDT/h）")
+            else:
+                print(f"[pricer] ⚠ 标价提交被拒: {resp.get('error')}")
+        except Exception as e:
+            print(f"[pricer] ⚠ 标价提交失败: {e}")
+
     config_dir = _os.path.expanduser("~/.agent-marketplace")
     _os.makedirs(config_dir, exist_ok=True)
     config_path = args.config or _os.path.join(config_dir, "agent.json")
@@ -554,6 +572,7 @@ def cmd_serve(args):
                 domain = args.domain or config.get("domain", "")
                 subdomain = args.subdomain or config.get("subdomain", "")
                 _start_pricer()
+                _submit_initial_price()
                 print("   监听中…… (15 分钟保活一次)")
                 while True:
                     time.sleep(3600)
@@ -595,6 +614,7 @@ def cmd_serve(args):
     print(f"   🔑 agent_token: {resp.get('agent_token', '')[:20]}…（保活/续费/刷新凭证，勿泄露）")
     print(f"   🔒 钱包私钥: 已加密存储于 {config_path}（0600 权限）")
     _start_pricer()
+    _submit_initial_price()
     print("   监听中…… (公网访问需安全组放行端口)")
     while True:
         time.sleep(3600)
