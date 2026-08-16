@@ -608,23 +608,6 @@ def cmd_serve(args):
     skills = [s.strip() for s in ((args.skills if args.skills else (config.get("skills") or "")) if isinstance(config.get("skills"), str) else ",".join(config.get("skills", []))).split(",") if s.strip()]
     if not domain:
         print("❌ 首次注册需要 --domain"); sys.exit(1)
-    # 真实链：注册前检查余额，不足则提示充值并轮询等待（到账后自动继续注册）
-    if os.environ.get("AGENT_HUB_MOCK_CHAIN", "0") != "1":
-        try:
-            from agent_sdk.chain import load_chain, get_balances
-            cfg = load_chain("bsc")
-            need = 0.0001 + 0.000002  # 注册费 0.0001 + 单笔 gas 0.000002
-            while True:
-                bal = get_balances(cfg, wallet.address)
-                if bal["native"] >= need:
-                    break
-                print(f"\n⚠ 钱包余额不足：{bal['native']:.6f} BNB < {need:.6f} BNB")
-                print(f"   请向该地址充值 BNB（注册费 0.0001 + gas 单笔 0.000002）: {wallet.address}")
-                print(f"   每 30 秒自动检查，到账后自动继续注册……（Ctrl+C 停止）")
-                time.sleep(30)
-            print(f"✅ 余额已到账（{bal['native']:.6f} BNB），继续注册……")
-        except Exception as e:
-            print(f"⚠ 余额检查失败（继续尝试注册）: {e}")
     resp = client.register_flow(endpoint=endpoint, domain=domain, subdomain=subdomain, skills=skills,
                                 description=getattr(args, "description", "") or "",
                                 model=getattr(args, "model_desc", "") or "",
