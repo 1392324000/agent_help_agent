@@ -1,0 +1,216 @@
+"""
+Agent SDK —— 订阅支付协议（Agent 间 USDT 结算）
+==================================================
+复刻「Agent↔Hub 注册」的订单-支付-验证-签发token-验签机制，但发生在
+两个智能体之间：需求方 A 向服务方 B 购买一段时间的调用权。
+
+流程（订单状态机 pending → paid → completed）：
+    A ──POST /subscribe──────────────▶ B  申请订阅（B 签发订单：金额=报价×时长）
+    A ──链上转账 USDT ──────────────▶ B  （BEP-20，链上直转，无托管）
+    A ──POST /subscribe/payment─────▶ B  提交 tx_hash（B 验证 USDT 到账）
+    A ◀──POST /subscribe/confirm────── B  确认后签发「签名订阅 token」
+    A ──POST /invoke {token,...}────▶ B  有效期内随便调用（B 验签 token 时效）
+    A ◀──{result, artifact}──────────── B  产物返回
+
+信任模型：
+    - 资金：A→B 链上 USDT 直转，无第三方托管（平台零资金风险）
+    - token：B 钱包私钥对 payload 的 ECDSA 签名，A 可验签（恢复地址==B）
+    - 验签：无状态（不查库），签名 + 时效即验证；防篡改（改任何字段签名失效）
+"""
+
+from __future__ import annotations
+
+import json
+import time
+import uuid
+
+from .wallet import (Wallet, recover_address_from_signature,
+                     parse_recoverable_signature)
+
+TOKEN_VERSION = 1
+DEFAULT_VALID_HOURS = 24  # 订单有效期（小时，未支付则过期）
+# 断开后会话保持窗口（分钟）：客户复购可接续之前的会话，过期则清理
+SUB_GRACE_MINUTES = int(__import__("os").environ.get("AGENT_SUB_KEEP_MINUTES", "5"))
+
+
+# ---------------------------------------------------------------------------
+# 签名订阅 token（服务方签发，需求方验签）
+# ---------------------------------------------------------------------------
+
+def create_sub_token(wallet: Wallet, subscriber: str, duration_hours: float,
+                     order_id: str, now: int | None = None) -> dict:
+    """服务方签发订阅 token：对 payload 规范化 JSON 做 ECDSA 签名。
+
+    返回 {"payload": {...}, "canon": 被签名的规范化字符串, "signature": 65字节hex}
+
+    测试钩子：`AGENT_SUB_DURATION_SCALE=N`（默认 1）把 token 有效期按 N 倍缩短——
+    仅用于演示/测试“刻钟购买 + 过期前自动续购”链路（金额不变，只缩有效期秒数）。
+    """
+    now = now or int(time.time())
+    import os as _os
+    scale = max(1, int(_os.environ.get("AGENT_SUB_DURATION_SCALE", "1") or 1))
+    payload = {
+        "v": TOKEN_VERSION,
+        "sub": subscriber.lower(),
+        "iss": wallet.address.lower(),
+        "dur_h": round(float(duration_hours), 6),
+        "oid": order_id,
+        "exp": now + int(float(duration_hours) * 3600 // scale),
+    }
+    canon = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    signature = wallet.sign_text(canon)
+    return {"payload": payload, "canon": canon, "signature": signature}
+
+
+def verify_sub_token(token: dict, expected_issuer: str) -> dict | None:
+    """需求方/服务方验签订阅 token。
+
+    校验：① 签名恢复地址 == 签发方(服务方)  ② 未过期。
+    通过返回 payload，失败返回 None。
+    """
+    try:
+        payload = token.get("payload") or {}
+        canon = token.get("canon") or ""
+        signature = token.get("signature") or ""
+        if not canon or not signature:
+            return None
+        sig_hex, rec_id = parse_recoverable_signature(signature)
+        recovered = recover_address_from_signature(sig_hex, canon.encode("utf-8"), rec_id)
+        if not recovered or recovered.lower() != expected_issuer.lower():
+            return None
+        if int(payload.get("exp", 0)) <= int(time.time()):
+            return None
+        return payload
+    except Exception:
+        return None
+
+
+# ---------------------------------------------------------------------------
+# 服务方订单状态机（内存存储；Agent 服务重启后订单需重新申请）
+# ---------------------------------------------------------------------------
+
+class SubscriptionStore:
+    """服务方本地的订阅订单状态机：pending → paid → completed。
+
+    与 Hub 注册订单状态机语义一致，仅存于服务方进程内（无中心库）。
+    """
+
+    def __init__(self):
+        self._orders: dict[str, dict] = {}
+        self._disconnects: list[dict] = []   # 自动断开记录（token 过期未续购）
+        self._workspaces: dict[str, dict] = {}  # 客户工作上下文（断开后保持窗口内不清理，复购可接续）
+        self._lock = __import__("threading").Lock()
+
+    def create(self, subscriber: str, duration_hours: float,
+               price_per_hour: float, receiver: str,
+               chain: str = "mock") -> dict:
+        order_id = "sub_" + uuid.uuid4().hex[:16]
+        amount = round(float(price_per_hour) * float(duration_hours), 6)
+        with self._lock:
+            self._orders[order_id] = {
+                "order_id": order_id,
+                "subscriber": subscriber.lower(),
+                "duration_hours": float(duration_hours),
+                "price_per_hour": float(price_per_hour),
+                "amount_usdt": amount,
+                "receiver": receiver,
+                "status": "pending",
+                "tx_hash": None,
+                "created_at": int(time.time()),
+                "paid_at": None,
+                "token": None,
+                "expires_at": None,
+            }
+        return dict(self._orders[order_id])
+
+    def get(self, order_id: str) -> dict | None:
+        with self._lock:
+            o = self._orders.get(order_id)
+            return dict(o) if o else None
+
+    def mark_paid(self, order_id: str, tx_hash: str) -> bool:
+        """pending -> paid（提交支付结果）。"""
+        with self._lock:
+            o = self._orders.get(order_id)
+            if not o or o["status"] != "pending":
+                return False
+            o["status"] = "paid"
+            o["tx_hash"] = tx_hash
+            o["paid_at"] = int(time.time())
+            return True
+
+    def mark_completed(self, order_id: str, token: dict) -> bool:
+        """paid -> completed（链上确认到账后签发 token）。"""
+        with self._lock:
+            o = self._orders.get(order_id)
+            if not o or o["status"] != "paid":
+                return False
+            o["status"] = "completed"
+            o["token"] = token
+            o["expires_at"] = token["payload"]["exp"]
+            return True
+
+    def is_expired(self, order_id: str) -> bool:
+        o = self.get(order_id)
+        if not o:
+            return True
+        # 订单 24 小时未支付视为过期
+        return o["status"] == "pending" and \
+            int(time.time()) - o["created_at"] > DEFAULT_VALID_HOURS * 3600
+
+    def disconnect(self, subscriber: str, order_id: str = "",
+                   expired_at: int | None = None) -> dict:
+        """token 过期自动断开：客户到期未续购 → 专家端记录断开事件。
+
+        断开后该客户旧 token 的一切调用都被拒（必须重新订阅换新 token）。
+        会话保持窗口内（AGENT_SUB_KEEP_MINUTES 分钟）复购可直接接续。
+        """
+        sub = subscriber.lower()
+        ev = {"subscriber": sub, "order_id": order_id,
+              "expired_at": expired_at or 0, "disconnected_at": int(time.time())}
+        with self._lock:
+            self._disconnects.append(ev)
+            # 保持会话：断开时把 keep_until 拉长到 now + 保持窗口（从断开时刻起算）
+            ws = self._workspaces.get(sub)
+            if ws:
+                ws["keep_until"] = time.time() + SUB_GRACE_MINUTES * 60
+        return ev
+
+    def disconnect_count(self) -> int:
+        with self._lock:
+            return len(self._disconnects)
+
+    # ---- 会话保持：工作上下文 + 复购接续 ----
+
+    def touch_workspace(self, subscriber: str, order_id: str,
+                        context: dict | None = None) -> dict:
+        """invoke 成功后更新客户工作上下文（复购时接续，含上次工作记录）。
+
+        保持窗口：keep_until = now + AGENT_SUB_KEEP_MINUTES 分钟，窗口内复购可接续。
+        """
+        sub = subscriber.lower()
+        now = int(time.time())
+        with self._lock:
+            ws = self._workspaces.get(sub) or {}
+            ws.update({"subscriber": sub, "order_id": order_id,
+                       "updated_at": now,
+                       "keep_until": time.time() + SUB_GRACE_MINUTES * 60})
+            if context:
+                ws["context"] = context
+            self._workspaces[sub] = ws
+        return dict(self._workspaces[sub])
+
+    def get_workspace(self, subscriber: str) -> dict | None:
+        """返回未过期的客户会话（复购接续用）；已过期则清理（会话不再保留）。"""
+        sub = subscriber.lower()
+        with self._lock:
+            ws = self._workspaces.get(sub)
+            if not ws:
+                return None
+            if ws["keep_until"] < time.time():
+                self._workspaces.pop(sub, None)
+                return None
+            return dict(ws)
+
+    def grace_seconds(self) -> int:
+        return SUB_GRACE_MINUTES * 60
