@@ -336,24 +336,27 @@ def cmd_register(args):
         print(json.dumps(app, ensure_ascii=False)); sys.exit(1)
     print(f"   order_id  : {app['order_id']}  (status={app['status']})")
     print(f"   平台钱包  : {app['platform_wallet']}")
-    print(f"   要求金额  : {app['amount_bnb']} BNB + {app['usdt_amount']} USDT（免费）")
+    print(f"   要求金额  : {app['amount_bnb']} BNB（注册费）")
     if app.get("chain_mode") == "mock":
         tx_hash = args.tx_hash or ("0x" + __import__("secrets").token_hex(32))
         print(f"\n② 支付（Mock 模式模拟转账 {tx_hash[:16]}…）……")
         client.mock_transfer(tx_hash, amount_wei=args.amount_wei)
     else:
-        tx_hash = args.tx_hash
-        if not tx_hash:
-            print("\n⚠ 真实 BSC 模式：请先用钱包向平台钱包转账微量 BNB，然后 --tx-hash 提供交易哈希")
-            print("  转账参考：~/.fly/capsules/skill/skill_wallet_management_v1_0_0/scripts/wallet_transfer.py")
-            sys.exit(1)
-        print(f"\n② 支付：已转账 {tx_hash}")
+        if not args.tx_hash:
+            # 真实链：钱包自动广播注册费（无需手工转账）
+            print("\n② 支付（真实 BSC：钱包自动广播注册费）……")
+            from agent_sdk.chain import load_chain, transfer_native
+            tx_hash = transfer_native(wallet, app["platform_wallet"], load_chain("bsc"),
+                                      amount=app["amount_bnb"])
+        else:
+            tx_hash = args.tx_hash
+        print(f"   已转账 {tx_hash}")
     print("\n③ 提交支付结果……")
     pay = client.submit_payment(app["order_id"], tx_hash)
     print(f"   status={pay.get('status')}: {pay.get('message', '')}")
     if not pay.get("ok"):
         sys.exit(1)
-    print("\n④ Hub 链上确认支付结果……")
+    print("\n④ Hub 链上确认支付结果（自动重试至确认）……")
     resp = client.confirm_order(app["order_id"])
     print(json.dumps(resp, ensure_ascii=False, indent=2))
     if resp.get("ok") and resp.get("status") == "completed":

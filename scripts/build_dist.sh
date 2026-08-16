@@ -44,8 +44,11 @@ cat > "$DIST/install.sh" <<'INSTALL_EOF'
 #   --skills <技能>         技能标签，逗号分隔（默认 backtesting）
 #   --price <USDT/小时>     服务报价（默认 0.005）
 #   --port <端口>           服务端口（默认 20102，端口约定全平台统一）
+#   --description <描述>    服务一句话描述（注册画像，供客户搜索定位）
+#   --demo-invoke           启用演示能力 ping/echo（测试订阅-调用链路用）
 #
 # 流程: 拉取 SDK → 初始化钱包身份(agent.json) → [--auto-serve] 注册上线
+# 真实链: 注册费由钱包自动广播（serve 自动转账），无需手工 --tx-hash
 # =============================================================================
 set -euo pipefail
 
@@ -56,6 +59,9 @@ SUBDOMAIN="quantitative_trading"
 SKILLS="backtesting"
 PRICE="0.005"
 PORT="20102"
+DESCRIPTION=""
+DEMO_INVOKE=0
+POS=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --auto-serve) AUTO_SERVE=1; shift ;;
@@ -64,7 +70,11 @@ while [[ $# -gt 0 ]]; do
     --skills) SKILLS="$2"; shift 2 ;;
     --price) PRICE="$2"; shift 2 ;;
     --port) PORT="$2"; shift 2 ;;
-    *) HUB_URL="$1"; shift ;;
+    --description) DESCRIPTION="$2"; shift 2 ;;
+    --demo-invoke) DEMO_INVOKE=1; shift ;;
+    *)
+      if [[ "$POS" -eq 0 ]]; then HUB_URL="$1"; POS=1; shift
+      else echo "❌ 未知参数: $1"; exit 1; fi ;;
   esac
 done
 
@@ -116,7 +126,8 @@ if [[ "$AUTO_SERVE" -eq 1 ]]; then
   echo "=================================================="
   exec $PYTHON "$CLI" --hub "$HUB_URL" serve \
     --port "$PORT" --domain "$DOMAIN" --subdomain "$SUBDOMAIN" \
-    --skills "$SKILLS" --price "$PRICE" --auto-price
+    --skills "$SKILLS" --price "$PRICE" --auto-price \
+    ${DESCRIPTION:+--description "$DESCRIPTION"} ${DEMO_INVOKE:+--demo-invoke}
 fi
 
 echo
