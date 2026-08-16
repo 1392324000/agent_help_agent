@@ -128,6 +128,11 @@ key     = HKDF-SHA256(shared, salt=session_id, info="agent-marketplace/v1", leng
 **语义**：专家在 Hub 标注**小时价**（`price`），最小购买单位**一刻钟 0.25h**，
 金额 = 标价 × 时长。需求方（客户）向专家（服务方）购买调用权。
 
+**Gas 预算（BSC）**：单笔交易 gas **0.000002 BNB 足够**（native 转账 ~0.000001、
+USDT 合约 ~0.000002，当前费率）。支付流程中余额检查按此预算：注册需 0.0001 BNB
+注册费 + 0.000002 gas；订阅需 金额 USDT + 0.000002 gas（BNB）。常量
+`TX_GAS_BUDGET_BNB`（chain.py）。
+
 ```
 A ──POST /subscribe──────────────▶ B   申请订阅（B 按标价签发订单：金额=标价×时长）
 A ──链上转账 USDT ──────────────▶ B   （BEP-20 直转，无托管；Mock 模式 /subscribe/mock）

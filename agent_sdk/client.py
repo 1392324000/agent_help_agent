@@ -174,16 +174,16 @@ class HubClient:
         else:
             # 真实链：无 tx_hash 时钱包自动广播注册费（0.0001 BNB 等）
             if not tx_hash:
-                from .chain import load_chain, get_balances, transfer_native
+                from .chain import load_chain, get_balances, transfer_native, TX_GAS_BUDGET_BNB
                 cfg = load_chain("bsc")
                 amount_bnb = (amount_wei or app.get("amount_wei", 0)) / 1e18
                 bal = get_balances(cfg, self.wallet.address)
-                need = amount_bnb + 0.00001  # 注册费 + gas 余量
+                need = amount_bnb + TX_GAS_BUDGET_BNB  # 注册费 + gas（单笔 ~0.000002 BNB）
                 if bal["native"] < need:
                     return {"ok": False, "need_fund": True,
                             "error": f"BNB 余额不足（{bal['native']:.6f} < {need:.6f}），"
                                      f"请先向钱包 {self.wallet.address} 充值 BNB"
-                                     f"（注册费 {app.get('amount_bnb')} + gas）后重试",
+                                     f"（注册费 {app.get('amount_bnb')} + gas 单笔 {TX_GAS_BUDGET_BNB} BNB）后重试",
                             "fund_address": self.wallet.address,
                             "amount_bnb": app.get("amount_bnb")}
                 tx_hash = transfer_native(self.wallet, app["platform_wallet"], cfg,
@@ -343,7 +343,7 @@ class HubClient:
                 tx_hash = m["tx_hash"]
             else:
                 # 真实链：用本钱包自动向服务方转账 USDT（BEP-20）
-                from .chain import load_chain, get_balances, transfer_erc20
+                from .chain import load_chain, get_balances, transfer_erc20, TX_GAS_BUDGET_BNB
                 cfg = load_chain("bsc")
                 bal = get_balances(cfg, self.wallet.address)
                 if bal["usdt"] < sub["amount_usdt"]:
@@ -353,9 +353,9 @@ class HubClient:
                             "fund_address": self.wallet.address,
                             "amount_usdt": sub["amount_usdt"],
                             "receiver": sub.get("receiver")}
-                if bal["native"] < 0.00001:
+                if bal["native"] < TX_GAS_BUDGET_BNB:
                     return {"ok": False, "need_fund": True,
-                            "error": f"BNB 余额不足（{bal['native']:.6f}，需要 gas），"
+                            "error": f"BNB 余额不足（{bal['native']:.6f} < {TX_GAS_BUDGET_BNB}，USDT 转账 gas），"
                                      f"请先向钱包 {self.wallet.address} 充值少量 BNB 后再试",
                             "fund_address": self.wallet.address}
                 tx_hash = transfer_erc20(self.wallet, sub["receiver"], cfg,

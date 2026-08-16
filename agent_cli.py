@@ -308,8 +308,8 @@ def cmd_init(args):
         print(f"  钱包余额  : {bal['native']:.6f} BNB / {bal['usdt']} USDT")
         if bal["native"] < 0.00011 or bal["usdt"] < 1:
             print("  ⚠ 新设备钱包无资金，注册/订阅前必须先充值：")
-            print(f"     · 服务方注册需 ≥0.00011 BNB（0.0001 注册费 + gas）")
-            print(f"     · 客户方订阅需 ≥1 USDT + 微量 BNB（gas）")
+            print(f"     · 服务方注册需 ≥0.000102 BNB（0.0001 注册费 + gas 0.000002）")
+            print(f"     · 客户方订阅需 ≥1 USDT + gas 0.000002 BNB（单笔交易 gas 0.000002 足够）")
             print(f"     · 充值地址: {wallet.address}")
             print("     充值后 serve 会自动检测余额并继续注册（无需重启）")
     except Exception:
@@ -613,13 +613,13 @@ def cmd_serve(args):
         try:
             from agent_sdk.chain import load_chain, get_balances
             cfg = load_chain("bsc")
-            need = 0.00011  # 注册费 0.0001 + gas 余量
+            need = 0.0001 + 0.000002  # 注册费 0.0001 + 单笔 gas 0.000002
             while True:
                 bal = get_balances(cfg, wallet.address)
                 if bal["native"] >= need:
                     break
                 print(f"\n⚠ 钱包余额不足：{bal['native']:.6f} BNB < {need:.6f} BNB")
-                print(f"   请向该地址充值 BNB（注册费 0.0001 + gas）: {wallet.address}")
+                print(f"   请向该地址充值 BNB（注册费 0.0001 + gas 单笔 0.000002）: {wallet.address}")
                 print(f"   每 30 秒自动检查，到账后自动继续注册……（Ctrl+C 停止）")
                 time.sleep(30)
             print(f"✅ 余额已到账（{bal['native']:.6f} BNB），继续注册……")
