@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
 """
-端到端 mock 演示（aha 核心闭环）：专家注册 → 客户搜索打分 → 挑选 → 订阅连接(mock支付)
-→ invoke 一对一工作 → 成交汇报 → 完成。
+端到端 mock 演示（aha 核心闭环）：专家注册 → 客户搜索打分 → 挑选 → 刻钟购买
+→ 一对一工作（token 过期前自动续购）→ 成交汇报 → 完成。
 
 用法（Hub 需已在 mock 模式运行，端口 20100）：
     AGENT_HUB_MOCK_CHAIN=1 python3 -u hub/hub.py          # 终端1：Hub
     python3 scripts/demo_e2e.py                            # 终端2：本演示
+
+购买语义：专家标价是**小时价**，最小购买单位**一刻钟(0.25h)**，金额 = 标价 × 0.25。
+工作期间 token 剩余有效期 < 30% 自动续购一刻钟（服务不中断），每笔订阅成交汇报。
 
 演示 3 个专家（各自钱包身份 + 端口 + 领域能力 + hub 标价）：
   #1 medical/radiology          X光/CT 病灶检测    2.0 USDT/h
@@ -18,6 +21,8 @@ import time
 
 # 演示 = mock 链：专家端订阅支付判定走 mock（模拟 USDT 转账），须在创建服务前设置
 os.environ.setdefault("AGENT_HUB_MOCK_CHAIN", "1")
+# 演示加速：token 有效期按 600 倍缩短（0.25h=900s→1.5s，金额不变），方便观察自动续购
+os.environ.setdefault("AGENT_SUB_DURATION_SCALE", "300")
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -81,6 +86,23 @@ def banner(t):
     print("\n" + "=" * 68 + f"\n  {t}\n" + "=" * 68)
 
 
+# 客户购买参数：最小单位一刻钟（0.25h），标价是小时价
+QUARTER_HOURS = 0.25
+# 演示加速：token 有效期按 AGENT_SUB_DURATION_SCALE 缩短（默认 1=真实时长）
+SUB_SCALE = 300          # 0.25h = 900s → 3s（金额不变，只缩有效期，方便看自动续购）
+RENEW_THRESHOLD = 0.50   # 剩余有效期 < 50% 时自动续购（提前续，留出续购+调用时间）
+RENEW_MAX = 5            # 演示最多续购 5 次后任务完成
+
+
+def _sub_token_seconds(token) -> float:
+    """该订阅 token 的总时长（秒），由 dur_h 换算（与 scale 无关的标称时长）。"""
+    return float(token["payload"]["dur_h"]) * 3600
+
+
+def _remaining_sec(token) -> float:
+    return float(token["payload"]["exp"]) - time.time()
+
+
 def main():
     banner("aha 端到端演示：专家注册 → 客户搜索打分 → 挑选 → 订阅连接 → 一对一工作 → 完成")
     experts = []  # (client, server, profile)
@@ -130,43 +152,78 @@ def main():
         if not hits:
             print("  ❌ 无匹配候选"); sys.exit(1)
 
-        # ---- ③ 客户挑选：按需求判定（得分+能力+标价）→ 订阅连接（mock 支付）----
-        banner("③ 客户挑选「影像专家」并订阅连接（mock 支付，token 验签）")
+        # ---- ③ 客户以刻钟购买，连接专家（mock 支付，token 验签）----
+        banner("③ 客户以刻钟(0.25h)购买影像专家服务（mock 支付，token 验签）")
         best = hits[0]
         # 从候选里挑出 medical/radiology 专家（演示"自行判定"，不只拿最高分）
         picked = next((a for a in hits if a["domain"] == "medical"), best)
         print(f"  选定: {picked['agent_id'][:16]}…  {picked['domain']}/{picked['subdomain']}"
-              f"  标价 {picked.get('price') or '?'} USDT/h")
-        sub = cust.subscribe_to_peer(picked["agent_id"], 0.25)
-        if not sub.get("ok"):
-            print(f"  ❌ 订阅失败: {sub.get('error')}"); sys.exit(1)
-        print(f"  ✅ 订阅成功: 订单 {sub['order_id']}  金额 {sub['amount_usdt']} USDT"
-              f"（{sub['price_per_hour']} USDT/h × 0.25h）  token 验签通过")
+              f"  标价 {picked.get('price') or '?'} USDT/h（最小单位：一刻钟）")
+
+        def buy_quarter():
+            """购买一刻钟，返回 (order, token)；金额 = 标价 × 0.25h。"""
+            sub = cust.subscribe_to_peer(picked["agent_id"], QUARTER_HOURS)
+            if not sub.get("ok"):
+                print(f"  ❌ 订阅失败: {sub.get('error')}")
+                sys.exit(1)
+            print(f"  💳 购买一刻钟: 订单 {sub['order_id']}  金额 {sub['amount_usdt']} USDT"
+                  f"（{sub['price_per_hour']} USDT/h × {QUARTER_HOURS}h）  token 验签通过")
+            return sub
+
+        sub = buy_quarter()
         token = sub["token"]
+        print(f"  ⏰ token 有效期: {_sub_token_seconds(token):.0f}s（演示加速 ×{SUB_SCALE}，"
+              f"真实为 15 分钟；续购阈值 {RENEW_THRESHOLD:.0%}）")
 
-        # ---- ④ 一对一工作：调用专家能力，直到产出结果 ----
-        banner("④ 一对一工作：客户带 token 调用专家能力（需求=参数，产物=返回值）")
-        cap = list(picked.get("caps") or {}).pop(0) if picked.get("caps") else "detect_lesion"
-        result = cust.invoke(picked["agent_id"], token, cap,
-                             {"image": "chest_xray_2026_0816.jpg"})
-        if not result.get("ok"):
-            print(f"  ❌ 调用失败: {result.get('error')}"); sys.exit(1)
-        print(f"  能力: {cap}")
-        for k, v in result.get("result", {}).items():
-            print(f"  产出 {k}: {v}")
-
-        # ---- ⑤ 成交汇报（服务方签名）→ 行情更新 ----
-        banner("⑤ 成交汇报（服务方签名 deal → Hub 行情更新）")
+        # ---- ④ 一对一持续工作：过期前自动续购，直到工作完成 ----
+        banner("④ 一对一工作：持续调用专家能力，token 剩余 < 50% 自动续购（刻钟），直到工作完成")
         seller_client = experts[[e[2]["subdomain"] for e in experts].index("radiology")][0]
-        deal = seller_client.report_deal(sub["order_id"], cust_wallet.address,
-                                         sub["amount_usdt"], 0.25)
-        print(f"  ✅ 成交已记录: {deal.get('message')}")
+        images = ["chest_xray_001.jpg", "chest_ct_002.dcm", "chest_xray_003.jpg",
+                  "chest_ct_004.dcm", "chest_xray_005.jpg"]
+        renews = 0
+        for i, img in enumerate(images, 1):
+            remain = _remaining_sec(token)
+            print(f"  ── 第 {i}/{len(images)} 次工作（影像 {img}）  token 剩余 {remain:.2f}s")
+            # 过期前自动续购：剩余有效期不足阈值 → 立刻续买一刻钟
+            if remain < _sub_token_seconds(token) * RENEW_THRESHOLD:
+                if renews >= RENEW_MAX:
+                    print(f"  ⏹ 续购次数达上限({RENEW_MAX})，任务完成，不再续购")
+                    break
+                renews += 1
+                print(f"  ↻ token 剩余 {remain:.2f}s < 阈值，自动续购第 {renews} 次（刻钟）……")
+                old_exp = token["payload"]["exp"]
+                sub = buy_quarter()
+                token = sub["token"]
+                print(f"  ✅ 续购完成: 旧 token 至 {time.strftime('%H:%M:%S', time.localtime(old_exp))}"
+                      f" → 新 token 至 {time.strftime('%H:%M:%S', time.localtime(token['payload']['exp']))}"
+                      f"（无空档，服务不中断）")
+                # 每笔订阅都是一笔成交 → 服务方签名汇报（行情据此更新）
+                seller_client.report_deal(sub["order_id"], cust_wallet.address,
+                                          sub["amount_usdt"], QUARTER_HOURS)
+            # 带 token 工作：需求=参数，产物=返回值（调用前兜底：剩余不足则立即续购）
+            if _remaining_sec(token) < 0.3:
+                print(f"  ↻ 调用前剩余不足，紧急续购……")
+                sub = buy_quarter()
+                token = sub["token"]
+                seller_client.report_deal(sub["order_id"], cust_wallet.address,
+                                          sub["amount_usdt"], QUARTER_HOURS)
+            result = cust.invoke(picked["agent_id"], token, "detect_lesion", {"image": img})
+            if not result.get("ok"):
+                print(f"  ❌ 调用失败: {result.get('error')}")
+                sys.exit(1)
+            r = result.get("result", {})
+            print(f"  ✅ 产出 findings: {r.get('findings')}")
+            time.sleep(0.5)  # 模拟工作耗时（加速演示）
+
+        # ---- ⑤ 成交汇总：行情 ----------------
+        banner("⑤ 成交汇报汇总（每笔刻钟订阅均由服务方签名汇报 → 行情）")
         market = cust.market_prices()
         print(f"  📊 市场行情: mode={market.get('market', {}).get('mode')} "
               f"source={market.get('market', {}).get('source')} "
               f"参考价 {market.get('market', {}).get('reference')} USDT/h")
 
-        banner("🎉 演示完成：搜索打分 → 挑选 → 订阅连接 → 一对一工作 → 成交，全链路通")
+        banner("🎉 演示完成：打分搜索 → 挑选 → 刻钟购买 → 过期前自动续购 → 一对一工作 → 成交")
+        print(f"  共续购 {renews} 次、完成 {min(len(images), i)} 次工作")
         print("  Hub 记录可查: http://127.0.0.1:20100/ （仪表盘 agents/orders/deals）")
     finally:
         for client, server, prof in experts:

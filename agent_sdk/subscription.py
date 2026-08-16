@@ -40,15 +40,20 @@ def create_sub_token(wallet: Wallet, subscriber: str, duration_hours: float,
     """服务方签发订阅 token：对 payload 规范化 JSON 做 ECDSA 签名。
 
     返回 {"payload": {...}, "canon": 被签名的规范化字符串, "signature": 65字节hex}
+
+    测试钩子：`AGENT_SUB_DURATION_SCALE=N`（默认 1）把 token 有效期按 N 倍缩短——
+    仅用于演示/测试“刻钟购买 + 过期前自动续购”链路（金额不变，只缩有效期秒数）。
     """
     now = now or int(time.time())
+    import os as _os
+    scale = max(1, int(_os.environ.get("AGENT_SUB_DURATION_SCALE", "1") or 1))
     payload = {
         "v": TOKEN_VERSION,
         "sub": subscriber.lower(),
         "iss": wallet.address.lower(),
         "dur_h": round(float(duration_hours), 6),
         "oid": order_id,
-        "exp": now + int(float(duration_hours) * 3600),
+        "exp": now + int(float(duration_hours) * 3600 // scale),
     }
     canon = json.dumps(payload, sort_keys=True, separators=(",", ":"))
     signature = wallet.sign_text(canon)
