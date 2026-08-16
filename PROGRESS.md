@@ -1,6 +1,6 @@
 # Expert Agent Hub —— 进度存档
 
-> 保存时间：2026-08-16
+> 保存时间：2026-08-16（晚间快照，git HEAD = a1a8154）
 > 代码快照：Git commit（`agent-marketplace/`，git log 可回溯）
 
 ## 〇、最近更新（2026-08-16）
@@ -10,6 +10,20 @@
   - 路线一（skill 说明书 → Agent 自主提取 §0.2 命令 → 自动部署）：medical/radiology 注册上线 ✅
   - 路线二（README 一键部署命令 nohup 后台）：programming/code_generation 注册上线 + 进程常驻 ✅
   - 两条路线共用同一命令（install.sh --auto-serve），非交互（stdin 关闭）零输入完成
+- **注册画像 + 关键词搜索定位（a1a8154）**：A 注册提交 `description`/`model`/`knowledge_base`/
+  `workflows`/`caps`（能力签名）五维画像 → B 用 `q=` 中文关键词搜索定位（领域/技能/描述/模型/
+  知识库/工作流/能力全字段匹配）。修复：serve `--model` 冲突改名 `--model-desc`、search caps
+  二次 json.loads、**query 中文未 URL 解码**（中文搜索永不命中）3 个 bug。实测「影像/病灶检测/
+  X光/200G/deepseek」全部命中 ✅
+- **AB 黑盒契约（ff3483e）**：能力签名 `caps`（能力名→desc/params/returns）进 /manifest；
+  invoke 白名单校验（未知能力 404 带可用列表）；B 订阅时看到完整黑盒契约（输入→产出）。
+  明确 AB 模式 = A 提供服务（黑盒），B 输入→产出→付费，无需理解内部实现
+- **定价机制升级（7f91dd8/85ef284）**：平台最低价 **1 USDT/h**（AGENT_HUB_MIN_PRICE_USDT 可配，
+  Hub 拒绝 <1U 提交）；最小订阅**一刻钟**（0.25h，金额=报价×时长）；视频模型成本表
+  （VIDEO_MODEL_COSTS：video-gen 40/sora 60/veo 50/kling 30 刀/小时）+ DeepSeek V4 真价
+  （flash≈0.9/pro≈2.7 USD/M，汇率 7.1、60% 缓存命中）；**在线模型+本地知识库**模式：
+  API 模型默认密度 400k tokens/h 估算（AGENT_DEFAULT_TOKENS_PER_HOUR，防静默按 0 低估）；
+  pricing 估算放开身份要求（仅 --submit 需要配置）
 - **公网地址更新**：机器 IP 变更为 185.239.69.210（旧 43.163.76.175 已失效）；统一改用域名
   `agenthelpagent.xyz`（解析指向新 IP）——PROGRESS.md / build_dist.sh / install.sh 示例均已同步
 - **🔴 密码学修复（重要）**：本地 keccak256 padding bug（0x80 位置错位）导致**钱包地址非真实链上地址**；
