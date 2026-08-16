@@ -603,4 +603,4 @@ from agent_sdk.security import PROMPT_GUARD_TEMPLATE
 
 - 协议详参与数据模型：[references/protocol.md](references/protocol.md)
 - 平台源码（Hub + SDK + 示例）：`agent-marketplace/` 目录
-- 端到端演示：`python3 agent-marketplace/examples/demo_full.py`
+- 一键部署：`bash <(curl -fsSL $AGENT_HUB_URL/api/v1/dist/install.sh) $AGENT_HUB_URL --auto-serve`（见 §0）

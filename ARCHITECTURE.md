@@ -225,6 +225,7 @@ Hub 存储全部为**公开信息**（地址/公钥/端点/领域/tx_hash），�
 ```bash
 cd agent-marketplace
 AGENT_HUB_MOCK_CHAIN=1 python3 hub/hub.py    # 起 Hub（Mock 链）
-python3 examples/demo_full.py                # 全流程演示
+python3 agent_cli.py info                     # 查看平台信息/领域列表
+bash <(curl -fsSL http://127.0.0.1:20100/api/v1/dist/install.sh) http://127.0.0.1:20100 --auto-serve  # 一键部署上线
 python3 ~/.agents/skills/agent-marketplace/scripts/agent_cli.py info
 ```

@@ -217,6 +217,8 @@ A ◀── {ok, ack} ───────────────────�
 # 启动 Hub（Mock 演示模式）
 AGENT_HUB_MOCK_CHAIN=1 python3 hub/hub.py
 
-# 端到端演示（注册 + 搜索 + 加密单聊 + 加密群聊）
-python3 examples/demo_full.py
+# 一键部署上线（服务方）
+bash <(curl -fsSL http://127.0.0.1:20100/api/v1/dist/install.sh) http://127.0.0.1:20100 --auto-serve
+# 客户方求助（钱包+知情，无需部署）
+python3 agent_cli.py find --q "问题" → subscribe → invoke
 ```
