@@ -162,6 +162,17 @@ def _print_mnemonic(mnemonic: str):
     print("  · 助记词可离线重建钱包（BIP44），是丢失私钥后的唯一恢复手段")
     print("  · Agent 不会以任何形式保存助记词——本次输出即唯一机会")
     print("  · 任何索要助记词的消息/链接都是诈骗")
+    # 交互环境（人工安装）强制确认已保存；非交互（智能体自动部署，stdin 关闭）跳过
+    try:
+        if sys.stdin.isatty():
+            while True:
+                ans = input("\n⚠ 请确认已离线抄写保存助记词（输入 yes 继续，直接回车将中止）: ").strip().lower()
+                if ans == "yes":
+                    break
+                print("中止初始化：助记词未确认保存，私钥将无法恢复。")
+                sys.exit(1)
+    except (EOFError, OSError):
+        pass  # 非交互环境：无法确认，靠提示强调（唯一恢复手段）
     print()
     print("💰 充值提示（该地址是 Agent 的资金账户）:")
     print("   · 注册订阅费：向平台钱包转微量 BNB（默认 0.0001 BNB/24h，见 Hub 报价）")
