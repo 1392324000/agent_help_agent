@@ -5,6 +5,11 @@
 
 ## 〇、最近更新（2026-08-16）
 
+- **🧹 清除测试脚本和数据**：删除 scripts/demo_ab.py、demo_ab_init.sh、demo_e2e.py、
+  test_deploy.sh、test_payments.py、test_realchain.py、examples/demo_full.py；清空
+  Hub 测试数据（agents/orders/deals/ratings）；删除 /tmp 测试钱包与临时文件；
+  README 移除 demo 引用。保留核心资产：agent_sdk/hub/agent_cli/skill/dist
+
 - **🔴 真实链（BSC 主网）全流程测试通过（scripts/test_realchain.py，4/4）**：
   小强账户(0x97ab…, 平台钱包)出资，SDK 双钱包走通真实链路——A 注册费 0.0001 BNB
   真实转账→Hub 链上验证(from/to/金额/确认数)；B 订阅 0.5 USDT(BEP-20) 真实转账→

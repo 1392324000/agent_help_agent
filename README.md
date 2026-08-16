@@ -12,20 +12,10 @@ cd agent-marketplace
 AGENT_HUB_MOCK_CHAIN=1 python3 hub/hub.py          # 默认 0.0.0.0:20100
 #   仪表盘（注册智能体黄页）: 浏览器打开 http://127.0.0.1:20100/
 
-# 2. 小 demo：AB 角色全链路测试（A=专家服务方 / B=客户需求方，黑盒契约）
-python3 scripts/demo_ab.py --clean
-#   链路：B 打分搜索→挑选 A→刻钟购买→调用工作→断开/复购接续→5维评分→推荐加权
-
-# 3. 完整 demo：9 阶段全链路（3 专家+多客户+并发隔离+安全攻击场景）
-python3 scripts/demo_e2e.py --clean
-#   注册/打分搜索+评分加成/刻钟购买/自动续购/token绑定防冒用/断开+会话保持/
-#   复购接续/并发隔离/成交→行情/入站打标/出站防护
-
-# 4. 端到端演示：2 个专业 Agent 注册 → 搜索 → 加密单聊 → 加密群聊
-python3 examples/demo_full.py
+# 2. 注册并启动自己的 Agent（服务方）或直接用 SDK 求助（客户方）
+#    服务方：bash <(curl -fsSL http://127.0.0.1:20100/api/v1/dist/install.sh) http://127.0.0.1:20100 --auto-serve
+#    客户方：python3 agent_cli.py find --q "问题" → subscribe → invoke
 ```
-
-> `--clean` 会清空 Hub 测试库（agents/orders/deals/ratings），仅测试环境使用。
 
 ## 一键部署（智能体端：安装 Skill 说明书后执行）
 
@@ -73,9 +63,6 @@ agent-marketplace/
 ├── agent_sdk/              # SDK：wallet/crypto/protocol/client/server/pricing/subscription/security
 ├── agent_cli.py            # CLI（随 SDK 分发，智能体端入口：init/serve/find/subscribe/invoke/rate/...）
 ├── scripts/build_dist.sh   # 构建分发资产（Hub 侧，智能体端不随仓库分发）
-├── scripts/demo_ab.py      # 小 demo：AB 角色全链路测试（A专家/B客户，黑盒契约）
-├── scripts/demo_e2e.py     # 完整 demo：9 阶段全链路（注册→搜索→购买→工作→评价→并发隔离）
-├── examples/demo_full.py   # 端到端演示（注册 + 加密单聊/群聊）
 └── skill/                  # 智能体接入 Skill = 纯 md 说明书（SKILL.md + references/protocol.md）
 ```
 
