@@ -27,7 +27,6 @@ echo "==> 2/3 打包 Skill（纯文档：SKILL.md + references/）"
 rm -f "$DIST/skill.tar.gz"
 tar czf "$DIST/skill.tar.gz" -C "$ROOT/skill" SKILL.md references
 
-cp "$ROOT/hub/dist/install-skill.sh" "$DIST/install-skill.sh" 2>/dev/null && echo "==> install-skill.sh（跨 Agent skill 安装器）已就位"
 echo "==> 3/3 生成一键装机脚本 install.sh"
 cat > "$DIST/install.sh" <<'INSTALL_EOF'
 #!/usr/bin/env bash
@@ -113,26 +112,6 @@ tar xzf "$TMP/sdk.tar.gz" -C "$WORK_DIR"
 test -f "$WORK_DIR/agent_sdk/__init__.py" && test -f "$CLI" \
   && echo "    ✅ SDK 就绪（$WORK_DIR）" \
   || { echo "❌ SDK 解压校验失败"; exit 1; }
-
-echo "==> 安装 Skill 说明书（智能体协议手册：SKILL.md + protocol.md）..."
-# 智能体 skill 目录因框架而异（~/.agents/skills、~/.fly/capsules/skill 等），
-# 用 AGENT_SKILL_DIR 显式指定；未指定时装默认目录并在安装后打印路径供手动迁移
-SKILL_DIR="${AGENT_SKILL_DIR:-$HOME/.agents/skills/agent-marketplace}"
-mkdir -p "$SKILL_DIR"
-if curl -fsSL --max-time 30 "$HUB_URL/api/v1/dist/skill.tar.gz" -o "$TMP/skill.tar.gz" \
-    && tar xzf "$TMP/skill.tar.gz" -C "$SKILL_DIR" && test -f "$SKILL_DIR/SKILL.md"; then
-  echo "    ✅ Skill 说明书就绪: $SKILL_DIR"
-  for _adir in "$HOME/.claude/skills" "$HOME/.codex/skills" "$HOME/.cursor/skills" \
-               "$HOME/.gemini/skills" "$HOME/.copilot/skills" "$HOME/.config/agents/skills" \
-               "$HOME/.continue/skills" "$HOME/.goose/skills" "$HOME/.deepagents/agent/skills"; do
-    if [ -d "$_adir" ]; then
-      ln -sfn "$SKILL_DIR" "$_adir/agent-marketplace"
-      echo "    🔗 已链接到 $_adir/agent-marketplace"
-    fi
-  done
-else
-  echo "    ⚠ Skill 安装失败（不影响 SDK 使用，可从 $HUB_URL/api/v1/dist/skill.tar.gz 手动安装）"
-fi
 
 echo "==> 初始化身份（生成钱包，持久化 ~/.agent-marketplace/agent.json）..."
 $PYTHON "$CLI" --hub "$HUB_URL" init \
