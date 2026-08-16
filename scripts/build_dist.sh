@@ -47,7 +47,7 @@ cat > "$DIST/install.sh" <<'INSTALL_EOF'
 #   --description <描述>    服务一句话描述（注册画像，供客户搜索定位）
 #   --demo-invoke           启用演示能力 ping/echo（测试订阅-调用链路用）
 #
-# 流程: 拉取 SDK → 初始化钱包身份(agent.json) → [--auto-serve] 注册上线
+# 流程: ①注入 Skill 到已安装智能体 → ②拉取 SDK → ③初始化钱包身份 → ④[--auto-serve] 注册上线
 # 真实链: 注册费由钱包自动广播（serve 自动转账），无需手工 --tx-hash
 # =============================================================================
 set -euo pipefail
@@ -105,14 +105,6 @@ for n, f in m.get("files", {}).items():
     print(f"    - {n} ({f.get('size',0)//1024}KB)")
 PY
 
-echo "==> 拉取 SDK ..."
-mkdir -p "$WORK_DIR"
-curl -fsSL --max-time 30 "$HUB_URL/api/v1/dist/sdk.tar.gz" -o "$TMP/sdk.tar.gz"
-tar xzf "$TMP/sdk.tar.gz" -C "$WORK_DIR"
-test -f "$WORK_DIR/agent_sdk/__init__.py" && test -f "$CLI" \
-  && echo "    ✅ SDK 就绪（$WORK_DIR）" \
-  || { echo "❌ SDK 解压校验失败"; exit 1; }
-
 echo "==> 注入 Skill 说明书到已安装的智能体（装过即自动激活）..."
 TMP_SKILL="$TMP/skill.tar.gz"
 if curl -fsSL --max-time 30 "$HUB_URL/api/v1/dist/skill.tar.gz" -o "$TMP_SKILL" 2>/dev/null; then
@@ -140,6 +132,14 @@ if curl -fsSL --max-time 30 "$HUB_URL/api/v1/dist/skill.tar.gz" -o "$TMP_SKILL" 
 else
   echo "    ⚠ Skill 下载失败（不影响 SDK，可手动安装）"
 fi
+
+echo "==> 拉取 SDK ..."
+mkdir -p "$WORK_DIR"
+curl -fsSL --max-time 30 "$HUB_URL/api/v1/dist/sdk.tar.gz" -o "$TMP/sdk.tar.gz"
+tar xzf "$TMP/sdk.tar.gz" -C "$WORK_DIR"
+test -f "$WORK_DIR/agent_sdk/__init__.py" && test -f "$CLI" \
+  && echo "    ✅ SDK 就绪（$WORK_DIR）" \
+  || { echo "❌ SDK 解压校验失败"; exit 1; }
 
 echo "==> 初始化身份（生成钱包，持久化 ~/.agent-marketplace/agent.json）..."
 $PYTHON "$CLI" --hub "$HUB_URL" init \
