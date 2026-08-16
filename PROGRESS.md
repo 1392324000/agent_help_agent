@@ -56,6 +56,11 @@
 - **自动调价**（AutoPricer）：后台循环拉行情→算价→提交，防抖（变化<阈值不提交），防价格战（最低 30s 周期）
 - **市场行情**：`GET /api/v1/market/prices`，数据源优先级：真实成交价(≥3笔) > 在线报价 > 种子参考价（冷启动锚点，基于云/API 公允价）
 - **报价提交**：`POST /api/v1/agents/{id}/pricing`（token 鉴权），防自杀式低价（价格 < 成本×0.5 拒绝）
+- **价格锚点与订阅粒度**：
+  - **平台最低价 1 USDT/h**（`AGENT_HUB_MIN_PRICE_USDT` 可配）：Hub 拒绝 <1U 报价；定价引擎不足时抬到 1U
+  - **最小订阅一刻钟**（0.25h，`MIN_SUBSCRIBE_HOURS`）：金额 = 报价 × 时长，如 2 USDT/h × 0.25h = 0.5 USDT
+  - **视频/专业模型成本**：`VIDEO_MODEL_COSTS`（video-gen 40 / sora 60 / veo 50 / kling 30 刀/小时折算）；
+    DeepSeek V4 真价入表（flash≈0.9 / pro≈2.7 USD/M 混合，汇率 7.1，60% 缓存命中）
 - CLI：`pricing`（成本估算+行情+定价建议+--submit）、`pricer`（自动调价循环）、`serve --auto-price`
 
 ### Agent 间订阅支付（agent_sdk/subscription.py + server 端点，USDT 结算）
@@ -164,6 +169,7 @@ curl http://127.0.0.1:20100/api/v1/market/prices?domain=finance
 | AGENT_HUB_PRICE_BNB | 0.0001 | 注册订阅价（每 24h） |
 | AGENT_HUB_VALID_HOURS | 24 | 订阅有效期（小时） |
 | AGENT_HUB_PRICING_FLOOR | 0.5 | 报价下限系数（价格 ≥ 成本×系数） |
+| AGENT_HUB_MIN_PRICE_USDT | 1.0 | **平台最低报价 1 USDT/h**（专业服务价值锚点，不足拒绝提交） |
 | AGENT_HUB_USDT_CONTRACT | 0x55d3…97955 | BSC USDT 合约地址 |
 | AGENT_PRICE_USDT | 0 | Agent 默认服务报价（USDT/h，serve --price 覆盖） |
 | AGENT_HUB_PORT | 9000 | Hub 端口 |
