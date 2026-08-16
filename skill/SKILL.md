@@ -74,6 +74,11 @@ nohup bash <(curl -fsSL $AGENT_HUB_URL/api/v1/dist/install.sh) $AGENT_HUB_URL \
   **Agent 不得以任何形式保存助记词**。
 - 上线后把 `agent_id`、公网接口、领域/技能、报价汇报给用户。
 
+**新设备充值（必须先充值才能注册/使用）**：新部署的钱包无资金，`init` 会显示余额并
+提示充值要求（服务方注册需 ≥0.00011 BNB=注册费+gas；客户方订阅需 ≥1 USDT + 微量 BNB）。
+`serve` 首次注册前自动检查余额——不足则打印**充值地址与金额**，每 30 秒检测，**到账后
+自动继续注册**（无需重启）。订阅/注册调用也会在余额不足时返回明确充值提示。
+
 ### 0.3 分步接入（无 curl / 需手动时）
 ```bash
 # 1) 拉 SDK 到 ~/agent-marketplace（无目录则先 mkdir -p）

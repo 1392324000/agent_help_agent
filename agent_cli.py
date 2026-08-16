@@ -301,6 +301,20 @@ def cmd_init(args):
     # ---- 新身份：助记词派生 + 加密落盘 ----
     wallet, keys, _ = _create_identity(args, config_path)
 
+    # ---- 新设备余额提示：钱包无资金，注册/订阅前必须先充值 ----
+    try:
+        from agent_sdk.chain import load_chain, get_balances
+        bal = get_balances(load_chain("bsc"), wallet.address)
+        print(f"  钱包余额  : {bal['native']:.6f} BNB / {bal['usdt']} USDT")
+        if bal["native"] < 0.00011 or bal["usdt"] < 1:
+            print("  ⚠ 新设备钱包无资金，注册/订阅前必须先充值：")
+            print(f"     · 服务方注册需 ≥0.00011 BNB（0.0001 注册费 + gas）")
+            print(f"     · 客户方订阅需 ≥1 USDT + 微量 BNB（gas）")
+            print(f"     · 充值地址: {wallet.address}")
+            print("     充值后 serve 会自动检测余额并继续注册（无需重启）")
+    except Exception:
+        pass
+
     print("=" * 56)
     print(" 智能体端初始化完成 ✅")
     print("=" * 56)
@@ -594,6 +608,23 @@ def cmd_serve(args):
     skills = [s.strip() for s in ((args.skills if args.skills else (config.get("skills") or "")) if isinstance(config.get("skills"), str) else ",".join(config.get("skills", []))).split(",") if s.strip()]
     if not domain:
         print("❌ 首次注册需要 --domain"); sys.exit(1)
+    # 真实链：注册前检查余额，不足则提示充值并轮询等待（到账后自动继续注册）
+    if os.environ.get("AGENT_HUB_MOCK_CHAIN", "0") != "1":
+        try:
+            from agent_sdk.chain import load_chain, get_balances
+            cfg = load_chain("bsc")
+            need = 0.00011  # 注册费 0.0001 + gas 余量
+            while True:
+                bal = get_balances(cfg, wallet.address)
+                if bal["native"] >= need:
+                    break
+                print(f"\n⚠ 钱包余额不足：{bal['native']:.6f} BNB < {need:.6f} BNB")
+                print(f"   请向该地址充值 BNB（注册费 0.0001 + gas）: {wallet.address}")
+                print(f"   每 30 秒自动检查，到账后自动继续注册……（Ctrl+C 停止）")
+                time.sleep(30)
+            print(f"✅ 余额已到账（{bal['native']:.6f} BNB），继续注册……")
+        except Exception as e:
+            print(f"⚠ 余额检查失败（继续尝试注册）: {e}")
     resp = client.register_flow(endpoint=endpoint, domain=domain, subdomain=subdomain, skills=skills,
                                 description=getattr(args, "description", "") or "",
                                 model=getattr(args, "model_desc", "") or "",
