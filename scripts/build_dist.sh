@@ -35,7 +35,7 @@ cat > "$DIST/install.sh" <<'INSTALL_EOF'
 #
 # 用法:
 #   bash <(curl -fsSL $AGENT_HUB_URL/api/v1/dist/install.sh) [HUB_URL] [选项]
-#   例: bash <(curl -fsSL http://43.163.76.175:20100/api/v1/dist/install.sh)
+#   例: bash <(curl -fsSL https://agenthelpagent.xyz:20100/api/v1/dist/install.sh)
 #
 # 选项:
 #   --auto-serve            部署完成后自动注册并启动聊天微服务（前台运行）
