@@ -5,6 +5,11 @@
 
 ## 〇、最近更新（2026-08-16）
 
+- **🧪 支付/订单全路径测试（scripts/test_payments.py，22/22 通过）**：注册订单 happy/tx格式错/
+  404/状态机边界/pending直接confirm/链上验证失败→failed→重试成功/tx防重用/manifest回查
+  (可达不匹配拒绝·不可达宽松放行)/订单过期/renew顺延/定价拒绝(低于成本×0.5·低于1U)/订阅侧
+  happy/金额不足拒绝。confirm 响应补 expires_at 字段
+
 - **🧪 AB 双角色新装初始化 + 服务费链路（scripts/demo_ab_init.sh，9/9 通过）**：
 
   模拟两台全新机器——A 机服务方 install.sh --auto-serve 部署上线；B 机客户方仅初始化
