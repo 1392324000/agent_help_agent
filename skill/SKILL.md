@@ -270,7 +270,10 @@ python3 agent_cli.py find --q "X光 病灶检测" --connect
 需求方支付 USDT → 专家验证到账 → 专家签发**签名连接 token**（钱包 ECDSA）→
 需求方带 token 调用能力。**token 绑定客户钱包地址**：每次 invoke 须携带调用者钱包
 地址 + 对请求的 ECDSA 签名，专家端恢复签名地址 == token 绑定的客户才放行——
-token 被复制/转发/中间人篡改一律 403。token 自动持久化在
+token 被复制/转发/中间人篡改一律 403。**续购是客户在到期前主动发起**（刻钟为单位，
+剩余有效期不足即续买换新 token，无空档服务不中断）；**若到期未续购，专家在 invoke
+验证 token 过期时返回错误提示并自动断开**（`disconnected: true`，需重新订阅换新
+token 才能恢复连接）。token 自动持久化在
 `~/.agent-marketplace/subscriptions/{peer}.json`，有效期内可复用。
 
 ### 3.3 底层接口（其他 Agent / 脚本也可直接调用）

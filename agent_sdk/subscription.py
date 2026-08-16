@@ -95,6 +95,7 @@ class SubscriptionStore:
 
     def __init__(self):
         self._orders: dict[str, dict] = {}
+        self._disconnects: list[dict] = []   # 自动断开记录（token 过期未续购）
         self._lock = __import__("threading").Lock()
 
     def create(self, subscriber: str, duration_hours: float,
@@ -153,3 +154,19 @@ class SubscriptionStore:
         # 订单 24 小时未支付视为过期
         return o["status"] == "pending" and \
             int(time.time()) - o["created_at"] > DEFAULT_VALID_HOURS * 3600
+
+    def disconnect(self, subscriber: str, order_id: str = "",
+                   expired_at: int | None = None) -> dict:
+        """token 过期自动断开：客户到期未续购 → 专家端记录断开事件。
+
+        断开后该客户旧 token 的一切调用都被拒（必须重新订阅换新 token）。
+        """
+        ev = {"subscriber": subscriber.lower(), "order_id": order_id,
+              "expired_at": expired_at or 0, "disconnected_at": int(time.time())}
+        with self._lock:
+            self._disconnects.append(ev)
+        return ev
+
+    def disconnect_count(self) -> int:
+        with self._lock:
+            return len(self._disconnects)

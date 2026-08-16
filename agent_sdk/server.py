@@ -526,12 +526,26 @@ class AgentServer:
                                             "order_id": order_id,
                                             "amount_usdt": order["amount_usdt"]})
 
-                # ---- 调用能力：验签 token（签名+时效）→ 校验调用者==token绑定的客户钱包 ----
+                # ---- 调用能力：验签 token → 校验调用者==token绑定的客户钱包 ----
+                #     token 过期 → 返回过期错误提示并自动断开（需重新订阅续购）
                 if path == protocol.AGENT_ENDPOINTS["invoke"]:
-                    payload = verify_sub_token(body.get("token") or {}, owner.wallet.address)
+                    tok = body.get("token") or {}
+                    tp = tok.get("payload") or {}
+                    exp = tp.get("exp")
+                    if isinstance(exp, (int, float)) and int(exp) <= int(time.time()):
+                        # 🔌 到期未续购换 token：专家端验证过期 → 提示 + 自动断开
+                        sub = str(tp.get("sub") or "").lower()
+                        ev = owner._subscriptions.disconnect(sub, str(tp.get("oid") or ""), int(exp))
+                        print(f"[{owner.name}] 🔌 连接已自动断开：客户 {sub[:12]}… 订阅"
+                              f"于 {time.strftime('%m-%d %H:%M', time.localtime(int(exp)))} 过期未续购")
+                        return self._send(403, {"ok": False,
+                                                "error": f"订阅已过期（{time.strftime('%m-%d %H:%M:%S', time.localtime(int(exp)))}），"
+                                                         f"连接已自动断开；请重新订阅续购（最小一刻钟）",
+                                                "disconnected": True, "expired_at": int(exp)})
+                    payload = verify_sub_token(tok, owner.wallet.address)
                     if not payload:
                         return self._send(403, {"ok": False,
-                                                "error": "订阅 token 无效或已过期（需先 POST /subscribe 订阅）"})
+                                                "error": "token 无效（签名校验失败或结构非法，请重新订阅）"})
                     capability = (body.get("capability") or "").strip()
                     params = body.get("params") or {}
                     # 🔒 token 绑定客户钱包：调用者地址必须 == token.sub，且请求签名

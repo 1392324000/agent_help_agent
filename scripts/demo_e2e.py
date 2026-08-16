@@ -270,8 +270,25 @@ def main():
                     detail = str(e)
             print(f"  🕵️ 中间人篡改参数(不重签) → ✅ 已拦截: {detail}")
 
+        # ---- ⑦ 到期未续购 → 专家验证过期 → 错误提示+自动断开 → 重新订阅恢复 ----
+        banner("⑦ 到期未续购：专家验证 token 过期 → 返回错误提示并自动断开 → 重新订阅恢复")
+        exp = token["payload"]["exp"]
+        wait = max(0.8, exp - time.time() + 0.8)
+        print(f"  ⏳ 停止续购，等 token 到期（{time.strftime('%H:%M:%S', time.localtime(exp))}，约 {wait:.1f}s）……")
+        time.sleep(wait)
+        r7 = cust.invoke(picked["agent_id"], token, "detect_lesion", {"image": "late_work.jpg"})
+        print(f"  📞 到期后调用 → " + (f"❌ 未被断开: {r7}" if r7.get("ok")
+              else f"✅ 专家返回: {r7.get('error')}（disconnected={r7.get('disconnected')}）"))
+        print(f"  🔌 重新订阅（换新 token）恢复连接……")
+        sub = buy_quarter()
+        token = sub["token"]
+        r8 = cust.invoke(picked["agent_id"], token, "detect_lesion", {"image": "resumed_work.jpg"})
+        print(f"  ✅ 续购后调用 → " + (f"成功: {r8.get('result', {}).get('findings')}"
+              if r8.get("ok") else f"失败: {r8.get('error')}"))
+
         banner("🎉 演示完成：打分搜索 → 挑选 → 刻钟购买 → 过期前自动续购 → 一对一工作 → 成交")
-        print(f"  共续购 {renews} 次、完成 {min(len(images), i)} 次工作；token 已绑定客户钱包（防冒用）")
+        print(f"  共续购 {renews} 次、完成 {min(len(images), i)} 次工作；token 绑定客户钱包；"
+              f"到期未续购自动断开，重新订阅可恢复")
         print("  Hub 记录可查: http://127.0.0.1:20100/ （仪表盘 agents/orders/deals）")
     finally:
         for client, server, prof in experts:
