@@ -113,6 +113,34 @@ test -f "$WORK_DIR/agent_sdk/__init__.py" && test -f "$CLI" \
   && echo "    ✅ SDK 就绪（$WORK_DIR）" \
   || { echo "❌ SDK 解压校验失败"; exit 1; }
 
+echo "==> 注入 Skill 说明书到已安装的智能体（装过即自动激活）..."
+TMP_SKILL="$TMP/skill.tar.gz"
+if curl -fsSL --max-time 30 "$HUB_URL/api/v1/dist/skill.tar.gz" -o "$TMP_SKILL" 2>/dev/null; then
+  SKILL_INSTALLED=0
+  for _adir in "$HOME/.claude/skills" "$HOME/.codex/skills" "$HOME/.cursor/skills" \
+               "$HOME/.gemini/skills" "$HOME/.copilot/skills" "$HOME/.config/agents/skills" \
+               "$HOME/.hermes/skills" "$HOME/.config/opencode/skills" "$HOME/.config/goose/skills" \
+               "$HOME/.continue/skills" "$HOME/.deepagents/agent/skills" "$HOME/.codeium/windsurf/skills" \
+               "$HOME/.trae/skills" "$HOME/.qwen/skills" "$HOME/.windsurf/skills" \
+               "$HOME/.config/devin/skills" "$HOME/.openhands/skills" "$HOME/.openclaw/skills" \
+               "$HOME/.roo/skills" "$HOME/.grok/skills"; do
+    [ -d "$_adir" ] || continue
+    _target="$_adir/agent-marketplace"
+    if [ -f "$_target/SKILL.md" ]; then
+      echo "    · $_adir 已注入，跳过"
+      continue
+    fi
+    if mkdir -p "$_target" 2>/dev/null && tar xzf "$TMP_SKILL" -C "$_target" 2>/dev/null \
+        && [ -f "$_target/SKILL.md" ]; then
+      echo "    ✅ 已注入: $_adir/agent-marketplace（进入智能体自动激活）"
+      SKILL_INSTALLED=$((SKILL_INSTALLED + 1))
+    fi
+  done
+  [ "$SKILL_INSTALLED" -eq 0 ] && echo "    （未检测到已安装的智能体，跳过注入）"
+else
+  echo "    ⚠ Skill 下载失败（不影响 SDK，可手动安装）"
+fi
+
 echo "==> 初始化身份（生成钱包，持久化 ~/.agent-marketplace/agent.json）..."
 $PYTHON "$CLI" --hub "$HUB_URL" init \
   || { echo "❌ 身份初始化失败"; exit 1; }
