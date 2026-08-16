@@ -5,6 +5,13 @@
 
 ## 〇、最近更新（2026-08-16）
 
+- **🔴 真实链（BSC 主网）全流程测试通过（scripts/test_realchain.py，4/4）**：
+  小强账户(0x97ab…, 平台钱包)出资，SDK 双钱包走通真实链路——A 注册费 0.0001 BNB
+  真实转账→Hub 链上验证(from/to/金额/确认数)；B 订阅 0.5 USDT(BEP-20) 真实转账→
+  A 解析回执 Transfer 事件验证到账→token 签发→invoke 完成。tx 均在 BSC 主网。
+  Hub 已切真实链模式（AGENT_HUB_MOCK_CHAIN=0）。教训：测试钱包必须持久化私钥
+  （首轮生成未存私钥致 0.0003 BNB+1 USDT 困于地址）
+
 - **🧪 支付/订单全路径测试（scripts/test_payments.py，22/22 通过）**：注册订单 happy/tx格式错/
   404/状态机边界/pending直接confirm/链上验证失败→failed→重试成功/tx防重用/manifest回查
   (可达不匹配拒绝·不可达宽松放行)/订单过期/renew顺延/定价拒绝(低于成本×0.5·低于1U)/订阅侧
