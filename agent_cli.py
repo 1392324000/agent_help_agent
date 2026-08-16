@@ -368,14 +368,53 @@ def cmd_search(args):
     if not agents:
         print("未找到匹配的智能体")
         return
-    print(f"找到 {len(agents)} 个专业智能体：\n")
-    for a in agents:
-        print(f"  agent_id   : {a['agent_id']}")
-        print(f"  领域       : {a['domain']}/{a['subdomain']}")
-        print(f"  技能       : {', '.join(a['skills'])}")
-        print(f"  接口地址   : {a['endpoint']}")
-        print(f"  公钥指纹   : {a['public_key'][:24]}…")
+    print(f"找到 {len(agents)} 个专业智能体（按关键词相关分排序）：\n")
+    for i, a in enumerate(agents, 1):
+        score = a.get("score")
+        price = a.get("price")
+        print(f"  #{i}  {a['agent_id'][:14]}…  "
+              + (f"得分 {score:.2f}" if score is not None else "")
+              + (f"  | 报价 {price} USDT/h" if price else "  | 未标价"))
+        print(f"      领域: {a['domain']}/{a['subdomain']}  技能: {', '.join(a['skills'])}")
+        if a.get("description"):
+            print(f"      简介: {a['description']}")
+        if a.get("caps"):
+            print(f"      能力: {', '.join(a['caps'].keys())}")
+        print(f"      接口: {a['endpoint']}")
         print()
+
+
+def cmd_find(args):
+    """aha 核心：遇问题→搜索打分→返回最佳匹配专家（含 hub 标价）。
+    --connect 时自动向最佳匹配订阅（按标价 × 时长支付，签发 token 供 invoke）。"""
+    client, _, _ = _client()
+    agents = client.search(domain=args.domain, q=args.q, limit=args.limit or 10)
+    scored = [a for a in agents if a.get("score", 0) > 0]
+    if not scored:
+        print(f"未找到与「{args.q}」匹配的在线专家")
+        return
+    scored.sort(key=lambda a: (a.get("score", 0), 1 if a.get("price") else 0), reverse=True)
+    print(f"🔍 关键词打分匹配（共 {len(scored)} 个候选，最佳在前）：\n")
+    for i, a in enumerate(scored[:args.limit or 5], 1):
+        price = a.get("price")
+        print(f"  #{i} 得分 {a['score']:.2f}  "
+              + (f"标价 {price} USDT/h" if price else "未标价"))
+        print(f"     {a['agent_id']}  {a['domain']}/{a['subdomain']}")
+        if a.get("description"):
+            print(f"     {a['description']}")
+        if a.get("caps"):
+            print(f"     能力: {', '.join(a['caps'].keys())}")
+        print()
+    if not args.connect:
+        print(f"→ 最佳匹配: {scored[0]['agent_id']}（标价 {scored[0].get('price') or '?'} USDT/h）")
+        print(f"  连接订阅: python3 agent_cli.py subscribe --peer {scored[0]['agent_id'][:14]}…"
+              " --duration 0.25（或 find 加 --connect 一键订阅）")
+        return
+    top = scored[0]
+    print(f"🚀 自动连接最佳匹配 {top['agent_id'][:14]}…（标价 {top.get('price') or '?'} USDT/h）")
+    cmd_subscribe(argparse.Namespace(peer=top["agent_id"], duration=args.duration,
+                                     tx_hash=None, wallet_key=None))
+
 
 
 def cmd_serve(args):
@@ -858,6 +897,14 @@ def main():
     s.add_argument("--q", help="自由文本搜索")
     s.add_argument("--limit", type=int, default=50)
     s.set_defaults(fn=cmd_search)
+
+    s = sub.add_parser("find", help="🔍 遇问题→关键词打分→最佳匹配专家（含 hub 标价）；--connect 一键订阅连接")
+    s.add_argument("--q", required=True, help="问题/需求描述（中文关键词即可）")
+    s.add_argument("--domain")
+    s.add_argument("--limit", type=int, default=5)
+    s.add_argument("--connect", action="store_true", help="自动向最佳匹配订阅（按标价 × 时长支付）")
+    s.add_argument("--duration", type=float, default=0.25, help="订阅时长小时（最小 0.25h 一刻钟）")
+    s.set_defaults(fn=cmd_find)
 
     s = sub.add_parser("serve", help="启动智能体服务并注册（默认端口 20102，公网地址；重启时自动恢复无需重新注册）")
     s.add_argument("--port", type=int, default=20102)
