@@ -594,7 +594,13 @@ def _sub_token_path(peer: str) -> str:
 
 
 def cmd_subscribe(args):
-    """向服务方订阅（USDT 结算）：申请订单→转账→提交→确认→验签 token。"""
+    """向服务方订阅（USDT 结算）：申请订单→转账→提交→确认→验签 token。
+    最小订阅单位：一刻钟（0.25 小时）。"""
+    from agent_sdk.protocol import MIN_SUBSCRIBE_HOURS
+    if args.duration < MIN_SUBSCRIBE_HOURS:
+        print(f"❌ 订阅时长不能小于 {MIN_SUBSCRIBE_HOURS} 小时（最小一刻钟），"
+              f"金额 = 报价 × 时长（如 1 USDT/h × 0.25h = 0.25 USDT）")
+        sys.exit(1)
     client, wallet, _ = _client(args, args.wallet_key)
     peer = args.peer.lower()
     manifest = client.get_peer_manifest(peer)
@@ -713,6 +719,7 @@ def cmd_pricing(args):
     detail = engine.suggest_with_market(market)
     print(f"\n💡 建议报价 (利润率 {args.margin:.0%}, 质量溢价 {args.premium:.0%}):")
     print(f"   成本加成价 : {detail['base_price']} USDC/h")
+    print(f"   平台最低价 : {detail.get('min_price_usdt', 1.0)} USDC/h（不足则取最低价）")
     if market and market.get("median"):
         print(f"   市场收敛   : median={market['median']} → 报价 {detail['suggested_price']} USDC/h")
     else:
@@ -849,7 +856,7 @@ def main():
 
     s = sub.add_parser("subscribe", help="向服务方订阅（USDT 结算）：订单→支付→验证→签发token→验签")
     s.add_argument("--peer", required=True, help="服务方 agent_id（钱包地址）")
-    s.add_argument("--duration", type=float, default=1.0, help="订阅时长（小时，默认 1）")
+    s.add_argument("--duration", type=float, default=1.0, help="订阅时长（小时，默认 1；最小 0.25 = 一刻钟，金额=报价×时长）")
     s.add_argument("--tx-hash", help="真实链模式：USDT 转账交易哈希")
     s.add_argument("--wallet-key")
     s.set_defaults(fn=cmd_subscribe)

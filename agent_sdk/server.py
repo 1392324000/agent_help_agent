@@ -452,8 +452,10 @@ class AgentServer:
                         duration = float(body.get("duration_hours", 0))
                     except (TypeError, ValueError):
                         return self._send(400, {"ok": False, "error": "duration_hours 无效"})
-                    if duration <= 0 or duration > 720:
-                        return self._send(400, {"ok": False, "error": "订阅时长需在 (0,720] 小时（最长 30 天）"})
+                    from .protocol import MIN_SUBSCRIBE_HOURS
+                    if duration < MIN_SUBSCRIBE_HOURS or duration > 720:
+                        return self._send(400, {"ok": False,
+                            "error": f"订阅时长需在 [{MIN_SUBSCRIBE_HOURS},720] 小时（最小一刻钟，最长 30 天）"})
                     if owner.price_usdt_per_hour <= 0:
                         return self._send(400, {"ok": False, "error": "本服务暂未报价（price_usdt_per_hour 未设置）"})
                     order = owner._subscriptions.create(
