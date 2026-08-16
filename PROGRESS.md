@@ -1,9 +1,27 @@
 # Expert Agent Hub —— 进度存档
 
-> 保存时间：2026-08-16（晚间快照，git HEAD = a1a8154）
+> 保存时间：2026-08-16（晚间快照，git HEAD = 496431f）
 > 代码快照：Git commit（`agent-marketplace/`，git log 可回溯）
+> 生产环境：Hub 真实链模式（bsc-mainnet）@ 20100；公网 https://agenthelpagent.xyz
+> GitHub：`1392324000/agent_help_agent`（仅 agent 端资产，hub/ 本地保留不公开）
 
-## 〇、最近更新（2026-08-16）
+## 〇、最近更新（2026-08-16 晚·本阶段总结）
+
+- **🔴 生产链路全自动打通（真实链 BSC 主网验证）**：注册/订阅自动广播链上交易（register_flow
+  自动转注册费、subscribe 自动付 USDT，无需手工 tx_hash）+ 自动重试（回执未生成/确认数不足
+  → retryable 保持 paid → 客户端轮询重试）；修 chain_verify 回执 null 崩溃、need_fund 处理。
+  全角色小强钱包测试 4/4：注册费/订阅费转回自己，资金零损失（仅 gas）
+- **🧾 用户部署方式（一键安装）**：`bash <(curl …/api/v1/dist/install.sh) … --auto-serve`
+  流程 = ①注入 Skill 到已安装智能体（20 目录，装过即自动激活）→ ②拉 SDK → ③init 钱包
+  （助记词一次性展示+交互确认/TTY、充值提示）→ ④serve 注册（余额自动检测：不足→充值指引+
+  30s 轮询等待+部分到账差额+5min 排查指引，到账自动继续；有 BNB 则全自动上线）
+- **🌐 语言分层**：机器层（Hub API/SDK 错误/首页）统一英文；AB 业务内容语言自由；用户层
+  按用户语言（skill §7.1）。USDC→USDT 修正（29 处），结算 = BSC 链 USDT(BEP-20)
+- **📦 GitHub 整理**：仓库 agent_help_agent 公开，仅 agent 端资产（hub/ 不入库、历史已清空重写）
+- **💳 支付体系**：刻钟购买/自动续购/断开+会话保持(5min)/复购接续/token 绑定钱包防冒用/
+  5 维评分→推荐加权/并发隔离；支付/订单全路径测试 22 项 + 部署初始化 18 项（均已随测试脚本删除，
+  逻辑沉淀在 SDK）
+- **gas 预算**：单笔交易 0.000002 BNB（TX_GAS_BUDGET_BNB），充值提示精确到 0.000102 BNB
 
 - **🔴 生产链路全自动验证通过（全角色小强钱包 0x97ab…，真实链 4/4）**：服务方/客户方
   都用小强钱包——注册费 0.0001 BNB 与订阅费 0.5 USDT 自动广播且转回自己，链上真实交易、
