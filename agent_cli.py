@@ -326,8 +326,12 @@ def cmd_register(args):
     else:
         endpoint = args.endpoint
     print(f"钱包地址: {wallet.address}")
-    print("\n① 申请注册，Hub 签发支付订单……")
-    app = client.apply_registration(endpoint, args.domain, args.subdomain, skills)
+    print("\n① 申请注册（Hub 签发支付订单，注册画像=能力/模型/知识库/工作流）……")
+    app = client.apply_registration(endpoint, args.domain, args.subdomain, skills,
+                                    description=getattr(args, "description", "") or "",
+                                    model=getattr(args, "model", "") or "",
+                                    knowledge_base=getattr(args, "knowledge_base", "") or "",
+                                    workflows=getattr(args, "workflows", "") or "")
     if not app.get("ok"):
         print(json.dumps(app, ensure_ascii=False)); sys.exit(1)
     print(f"   order_id  : {app['order_id']}  (status={app['status']})")
@@ -514,7 +518,12 @@ def cmd_serve(args):
     skills = [s.strip() for s in ((args.skills if args.skills else (config.get("skills") or "")) if isinstance(config.get("skills"), str) else ",".join(config.get("skills", []))).split(",") if s.strip()]
     if not domain:
         print("❌ 首次注册需要 --domain"); sys.exit(1)
-    resp = client.register_flow(endpoint=endpoint, domain=domain, subdomain=subdomain, skills=skills)
+    resp = client.register_flow(endpoint=endpoint, domain=domain, subdomain=subdomain, skills=skills,
+                                description=getattr(args, "description", "") or "",
+                                model=getattr(args, "model_desc", "") or "",
+                                knowledge_base=getattr(args, "knowledge_base", "") or "",
+                                workflows=getattr(args, "workflows", "") or "",
+                                caps=getattr(server, "caps", None) or {})
     if not resp.get("ok"):
         print(f"注册失败: {resp}"); sys.exit(1)
     config.update({"agent_id": wallet.address, "endpoint": endpoint, "domain": domain,
@@ -829,6 +838,10 @@ def main():
 
     s = sub.add_parser("register", help="注册到平台")
     s.add_argument("--endpoint", required=True, help="自己的接口地址，如 http://1.2.3.4:20102，或 auto（自动用公网 IP + --port）")
+    s.add_argument("--description", help="服务/工作流一句话描述（B 搜索定位）")
+    s.add_argument("--model", help="模型配置（如 deepseek-v4-flash 在线API / T4+local 本地推理）")
+    s.add_argument("--knowledge-base", help="知识库配置（如 本地财报库 20G）")
+    s.add_argument("--workflows", help="处理的工作流（如 财报分析→风险评估→投资建议）")
     s.add_argument("--port", type=int, default=20102, help="endpoint=auto 时使用的端口（默认 20102，见协议端口约定）")
     s.add_argument("--domain", required=True, help="一级领域（finance/medical/programming/...）")
     s.add_argument("--subdomain", default="", help="二级领域")
@@ -859,6 +872,10 @@ def main():
     s.add_argument("--endpoint", help="对外接口地址（默认自动公网 IP:port，AGENT_PUBLIC_IP 可指定）")
     s.add_argument("--price", type=float, default=None, help="服务报价（USDT/小时），不传则不报价（订阅接口不可用）")
     s.add_argument("--demo-invoke", action="store_true", help="启用演示能力 ping/echo（方便测试订阅-调用链路）")
+    s.add_argument("--description", help="服务/工作流一句话描述（注册画像，B 搜索定位）")
+    s.add_argument("--model-desc", help="模型配置描述（如 deepseek-v4-flash 在线API / T4+local 本地推理）")
+    s.add_argument("--knowledge-base", help="知识库配置（如 本地财报库 20G）")
+    s.add_argument("--workflows", help="处理的工作流（如 财报分析→风险评估→投资建议）")
     s.add_argument("--auto-price", action="store_true", help="启动自动调价（自主报价机制）")
     s.add_argument("--gpu", default="none", help="自动报价：硬件型号（h100/a100/a10/v100/l4/t4/cpu/none）")
     s.add_argument("--model", default="none", help="自动报价：模型（gpt-4o/.../local/none）")

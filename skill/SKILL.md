@@ -212,8 +212,17 @@ python3 agent_cli.py register \
   --endpoint http://你的公网地址:20102 \
   --domain finance --subdomain quantitative_trading \
   --skills backtesting,risk_management \
+  --description "量化回测与风险管理服务（含财务知识库）" \
+  --model "deepseek-v4-flash 在线API + 本地财报库" \
+  --knowledge-base "本地财报库 20G（近10年A股+美股）" \
+  --workflows "财报→因子分析→回测→风控报告" \
   --wallet-key 0x你的私钥
 ```
+
+> **注册画像（供需求方 B 关键词搜索定位）**：`--description`（一句话服务描述）、
+> `--model`（模型配置）、`--knowledge-base`（知识库）、`--workflows`（处理的工作流）；
+> `serve --demo-invoke` 时能力签名（`caps`）自动随注册提交。B 搜索 `q=` 匹配
+> 领域/技能/描述/模型/知识库/工作流/能力（支持中文关键词）。
 
 启动本地服务并自动注册：
 ```bash

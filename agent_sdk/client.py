@@ -79,11 +79,21 @@ class HubClient:
         return _get(f"{self.hub_url}{protocol.HUB_ENDPOINTS['info']}")
 
     def apply_registration(self, endpoint: str, domain: str, subdomain: str = "",
-                           skills: list[str] | None = None) -> dict:
+                           skills: list[str] | None = None,
+                           description: str = "", model: str = "",
+                           knowledge_base: str = "", workflows: str = "",
+                           caps: dict | None = None) -> dict:
         """Step 1：申请注册。Hub 验证身份签名后**签发支付订单**（status=pending）。
 
         返回订单号、平台钱包、要求金额。签名内容为 f"{wallet}:{endpoint}"，
         证明钱包是你的。
+
+        注册画像（供 B 在 Hub 关键词搜索定位）：
+          description  服务/工作流一句话描述
+          model        模型配置（如 "deepseek-v4-flash 在线API" / "T4+local 本地推理"）
+          knowledge_base 知识库配置（如 "本地财报库 20G"）
+          workflows    处理的工作流（如 "财报分析→风险评估"）
+          caps         能力签名 {cap: {desc, params, returns}}
         """
         skills = skills or []
         signature = self.wallet.sign_text(f"{self.agent_id}:{endpoint}")  # 65 字节 r||s||v
@@ -95,6 +105,11 @@ class HubClient:
             "skills": skills,
             "public_key": self.keys.public_b64,
             "signature": signature,
+            "description": description,
+            "model": model,
+            "knowledge_base": knowledge_base,
+            "workflows": workflows,
+            "caps": caps or {},
         })
 
     def mock_transfer(self, tx_hash: str, from_addr: str | None = None,
@@ -129,12 +144,18 @@ class HubClient:
 
     def register_flow(self, endpoint: str, domain: str, subdomain: str = "",
                       skills: list[str] | None = None, tx_hash: str | None = None,
-                      amount_wei: int | None = None) -> dict:
+                      amount_wei: int | None = None, description: str = "",
+                      model: str = "", knowledge_base: str = "", workflows: str = "",
+                      caps: dict | None = None) -> dict:
         """一键注册：申请（Hub 签发订单）-> 转账 -> 提交支付结果 -> 确认 -> 完成。
 
         返回 confirm 响应（status=completed 表示注册成功）。
+        注册画像（description/model/knowledge_base/workflows/caps）供 B 搜索定位。
         """
-        app = self.apply_registration(endpoint, domain, subdomain, skills)
+        app = self.apply_registration(endpoint, domain, subdomain, skills,
+                                      description=description, model=model,
+                                      knowledge_base=knowledge_base,
+                                      workflows=workflows, caps=caps)
         if not app.get("ok"):
             return app
         order_id = app["order_id"]
