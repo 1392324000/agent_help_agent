@@ -218,8 +218,9 @@ def _create_identity(args, config_path: str) -> tuple[Wallet, KeyPair, dict]:
 
 
 def cmd_balance(args):
-    """查看钱包余额（BSC 主网只读）：BNB（订阅费）+ USDT/BEP-20（结算/收益）。"""
-    from agent_sdk.chain import get_balances
+    """查看钱包余额（任意 EVM 链只读）：原生币 + 结算代币(USDT)。"""
+    from agent_sdk.chain import get_balances, load_chain
+    cfg = load_chain(args.chain)
     address = getattr(args, "address", "") or ""
     if not address:
         config_path = getattr(args, "config", None) or os.path.expanduser("~/.agent-marketplace/agent.json")
@@ -231,16 +232,18 @@ def cmd_balance(args):
     if not address:
         print("❌ 未指定地址：--address 0x... 或先 init（agent.json）")
         sys.exit(1)
-    print(f"🔍 查询 {address}（BSC 主网）……")
-    bal = get_balances(address)
-    print(f"   BNB  : {bal['bnb']:.6f}")
-    print(f"   USDT : {bal['usdt']:.6f}")
-    print("   提示：BNB 用于订阅费（向平台钱包转微量 BNB/24h）；USDT 用于 Agent 间结算")
+    print(f"🔍 查询 {address}（{cfg.name}，chain_id={cfg.chain_id}）……")
+    bal = get_balances(cfg, address)
+    print(f"   {cfg.native_symbol:<6}: {bal['native']:.6f}")
+    if "usdt" in bal:
+        print(f"   {bal['usdt_symbol']:<6}: {bal['usdt']:.6f}")
+    print(f"   提示：{cfg.native_symbol} 用于 gas/订阅费；{bal.get('usdt_symbol','USDT')} 用于 Agent 间结算")
 
 
 def cmd_withdraw(args):
-    """转出钱包收益（BNB 原生或 USDT/BEP-20）：EIP-155 签名广播，私钥不落盘。"""
-    from agent_sdk.chain import transfer_bnb, transfer_usdt
+    """转出钱包收益（原生币或 ERC-20 结算代币）：EIP-155/1559 签名广播，私钥不落盘。"""
+    from agent_sdk.chain import transfer_native, transfer_erc20, load_chain
+    cfg = load_chain(args.chain)
     config_path = args.config or os.path.expanduser("~/.agent-marketplace/agent.json")
     if not os.path.exists(config_path):
         print("❌ 未找到身份，请先 init")
@@ -251,24 +254,26 @@ def cmd_withdraw(args):
     if not to.startswith("0x") or len(to) != 42:
         print("❌ --to 必须是 0x + 40 位 hex 地址")
         sys.exit(1)
-    print(f"💸 转出 {args.token.upper()} → {to}（BSC 主网）……")
+    sym = args.token.upper() if args.token != "native" else cfg.native_symbol
+    print(f"💸 转出 {sym} → {to}（{cfg.name}，chain_id={cfg.chain_id}）……")
     if args.token == "usdt":
         if not args.amount or args.amount <= 0:
             print("❌ --token usdt 需要 --amount（数量）")
             sys.exit(1)
-        tx = transfer_usdt(wallet, to, args.amount)
-        print(f"✅ USDT {args.amount} 转出已广播: {tx}")
+        tx = transfer_erc20(wallet, to, cfg, amount=args.amount, tx_type=args.tx_type)
+        print(f"✅ {cfg.usdt_symbol} {args.amount} 转出已广播: {tx}")
     else:
         if args.all:
-            tx = transfer_bnb(wallet, to, all_balance=True)
-            print(f"✅ BNB 全部转出（扣除 gas）已广播: {tx}")
+            tx = transfer_native(wallet, to, cfg, all_balance=True, tx_type=args.tx_type)
+            print(f"✅ {cfg.native_symbol} 全部转出（扣除 gas）已广播: {tx}")
         else:
             if not args.amount or args.amount <= 0:
-                print("❌ --token bnb 需要 --amount 或 --all")
+                print(f"❌ --token native 需要 --amount 或 --all")
                 sys.exit(1)
-            tx = transfer_bnb(wallet, to, amount_bnb=args.amount)
-            print(f"✅ BNB {args.amount} 转出已广播: {tx}")
-    print("   链上确认可在浏览器查看（https://bscscan.com/tx/" + tx + "）")
+            tx = transfer_native(wallet, to, cfg, amount=args.amount, tx_type=args.tx_type)
+            print(f"✅ {cfg.native_symbol} {args.amount} 转出已广播: {tx}")
+    if cfg.scan_url:
+        print(f"   链上确认: {cfg.scan_url}/tx/{tx}")
 
 
 def cmd_info(args):
@@ -780,6 +785,7 @@ def cmd_pricer(args):
 
 def main():
     global HUB_URL
+    from agent_sdk.chain import CHAIN_PRESETS
     p = argparse.ArgumentParser(description="Agent Marketplace CLI")
     p.add_argument("--hub", default=HUB_URL, help=f"Hub 地址（默认 {HUB_URL}，或环境变量 AGENT_HUB_URL）")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -868,16 +874,23 @@ def main():
     s.add_argument("--wallet-key")
     s.set_defaults(fn=cmd_invoke)
 
-    s = sub.add_parser("balance", help="查看钱包余额（BSC 主网只读：BNB + USDT/BEP-20）")
+    s = sub.add_parser("balance", help="查看钱包余额（任意 EVM 链只读：原生币 + USDT）")
+    s.add_argument("--chain", default=os.environ.get("AGENT_HUB_CHAIN", "bsc"),
+                   help=f"EVM 链（{', '.join(CHAIN_PRESETS)}；或自定义+AGENT_HUB_CHAIN_ID）")
     s.add_argument("--address", help="钱包地址（默认 agent.json 的 agent_id）")
     s.add_argument("--config", help="身份文件（默认 ~/.agent-marketplace/agent.json）")
     s.set_defaults(fn=cmd_balance)
 
-    s = sub.add_parser("withdraw", help="转出钱包收益（BNB 或 USDT/BEP-20，EIP-155 签名广播）")
+    s = sub.add_parser("withdraw", help="转出钱包收益（原生币或 USDT/ERC-20，EIP-155/1559 签名广播）")
     s.add_argument("--to", required=True, help="收款地址 0x...")
-    s.add_argument("--token", default="bnb", choices=["bnb", "usdt"], help="币种（默认 bnb）")
-    s.add_argument("--amount", type=float, help="转出数量；bnb 可用 --all 转出全部（扣 gas）")
-    s.add_argument("--all", action="store_true", help="转出全部 BNB")
+    s.add_argument("--token", default="native", choices=["native", "usdt"],
+                   help="币种：native=原生币(BNB/ETH…)，usdt=结算代币（默认 native）")
+    s.add_argument("--amount", type=float, help="转出数量；native 可用 --all 转出全部（扣 gas）")
+    s.add_argument("--all", action="store_true", help="转出全部原生币")
+    s.add_argument("--chain", default=os.environ.get("AGENT_HUB_CHAIN", "bsc"),
+                   help=f"EVM 链（{', '.join(CHAIN_PRESETS)}；或自定义+AGENT_HUB_CHAIN_ID）")
+    s.add_argument("--tx-type", type=int, default=None, choices=[0, 2],
+                   help="交易类型：0=legacy(EIP-155)，2=EIP-1559（默认 legacy）")
     s.add_argument("--config", help="身份文件（默认 ~/.agent-marketplace/agent.json，私钥服务密钥自动解密）")
     s.set_defaults(fn=cmd_withdraw)
 

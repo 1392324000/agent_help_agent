@@ -16,9 +16,15 @@
   - **影响**：旧 agent.json 私钥不变，但修复后地址=真实地址 → agent_id 变化，需重新 `serve` 注册；
     Hub 旧记录（错误地址）随订阅过期自然清理
 - **钱包余额查询/转出（agent_sdk/chain.py，纯 JSON-RPC 零新依赖）**：
-  - `agent_cli.py balance`：BNB + USDT(BEP-20) 余额（BSC 主网只读）
-  - `agent_cli.py withdraw --to 0x... --token bnb|usdt --amount N [--all]`：EIP-155 签名广播
-  - init 展示助记词后提醒：充值（BNB 订阅费 + USDT 结算资金）+ 定期 balance/withdraw 转出收益
+  - `agent_cli.py balance`：原生币 + USDT 余额（任意 EVM 链只读）
+  - `agent_cli.py withdraw --to 0x... --token native|usdt --amount N [--all] [--tx-type 0|2]`：
+    EIP-155(legacy)/EIP-1559(type-2) 签名广播（均经 eth_keys 恢复验证 ✅）
+  - init 展示助记词后提醒：充值（原生币订阅费 + USDT 结算资金）+ 定期 balance/withdraw 转出收益
+- **完整 EVM 支持（ChainConfig + 预设链 + 环境变量覆盖）**：
+  - 预设链：bsc(BNB/USDT)/eth(ETH/USDT·6精度)/polygon/arbitrum/op/base；`--chain` 选择
+  - 任意自定义链：`AGENT_HUB_CHAIN_ID` + `AGENT_HUB_RPC_URLS`（+ 符号/合约/精度/浏览器）
+  - 交易类型：legacy(EIP-155) 默认 + type-2(EIP-1559 maxFee/maxPriorityFee) 可选
+  - 当前交易落地：BSC 链 BNB（订阅费/gas）+ USDT(BEP-20)（Agent 间结算）
 
 ## 一、当前运行状态
 
@@ -165,6 +171,11 @@ curl http://127.0.0.1:20100/api/v1/market/prices?domain=finance
 | AGENT_HUB_DB_PATH | hub/hub.db | Hub 数据文件路径（可重定向，生产可放独立磁盘） |
 | AGENT_HUB_DIST_DIR | hub/dist/ | 分发资产目录（SDK/Skill/install.sh） |
 | AGENT_SERVER_KEY | 自动生成 | **服务密钥**：加密 agent.json 钱包私钥（ChaCha20-Poly1305）；缺省自动生成 server.key（0600），无人值守自动解密 |
+| AGENT_HUB_CHAIN | bsc | 默认链（balance/withdraw 的 --chain，预设 bsc/eth/polygon/arbitrum/op/base） |
+| AGENT_HUB_RPC_URLS | 预设链 RPC | 自定义链 RPC 端点（逗号分隔） |
+| AGENT_HUB_NATIVE_SYMBOL | 预设 | 自定义链原生币符号 |
+| AGENT_HUB_USDT_SYMBOL | USDT | 结算代币符号 |
+| AGENT_HUB_SCAN_URL | 预设 | 区块浏览器前缀（如 https://bscscan.com） |
 | AGENT_HUB_BSC_RPC | bsc-rpc.publicnode.com | BSC RPC 端点（balance/withdraw/链上验证） |
 | AGENT_HUB_CHAIN_ID | 56 | 链 ID（EIP-155 交易签名，BSC 主网） |
 | AGENT_HUB_USDT_GAS | 100000 | USDT transfer 的 gasLimit 上限 |
