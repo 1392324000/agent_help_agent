@@ -457,7 +457,7 @@ def cmd_serve(args):
         pricer.start(background=True)
         try:
             d = pricer.tick()
-            print(f"[pricer] 首次报价: {d['suggested_price']} USDC/h"
+            print(f"[pricer] 首次报价: {d['suggested_price']} USDT/h"
                   f"（成本 {cost}，市场 median={d.get('market_median')}，提交={d.get('submitted')}）")
         except Exception as e:
             print(f"[pricer] ⚠ 首次调价失败: {e}")
@@ -840,10 +840,10 @@ def cmd_pricing(args):
         print(f"📊 市场行情 [{domain or '全部'}]:")
         print(f"   模式     : {'真实成交分布' if market.get('mode') == 'market' else '种子参考价(冷启动)'}")
         print(f"   报价数   : {market.get('count')}")
-        print(f"   中位数   : {market.get('median')} USDC/h")
-        print(f"   P25/P75  : {market.get('p25')} / {market.get('p75')} USDC/h")
-        print(f"   区间     : {market.get('min')} ~ {market.get('max')} USDC/h")
-        print(f"   参考锚   : {market.get('reference')} USDC/h")
+        print(f"   中位数   : {market.get('median')} USDT/h")
+        print(f"   P25/P75  : {market.get('p25')} / {market.get('p75')} USDT/h")
+        print(f"   区间     : {market.get('min')} ~ {market.get('max')} USDT/h")
+        print(f"   参考锚   : {market.get('reference')} USDT/h")
 
     # 成本估算
     cost_est = CostEstimator(gpu=args.gpu, model=args.model,
@@ -861,25 +861,25 @@ def cmd_pricing(args):
             else "视频生成模型（按小时折算）" if args.model in ("video-gen", "sora", "veo", "kling")
             else "在线模型 API")
     print(f"\n💰 成本估算 ({args.gpu}/{args.model}) · 运行模式: {mode}")
-    print(f"   硬件     : {breakdown['hardware']} USDC/h（本地 GPU/服务器）")
-    print(f"   模型 API : {breakdown['model_api']} USDC/h（{breakdown['tokens_per_hour']} tokens/h"
+    print(f"   硬件     : {breakdown['hardware']} USDT/h（本地 GPU/服务器）")
+    print(f"   模型 API : {breakdown['model_api']} USDT/h（{breakdown['tokens_per_hour']} tokens/h"
           + ("，默认密度估算，请用 --tokens-per-hour 校正 ⚠" if breakdown.get("estimated_density") else "）"))
-    print(f"   知识库   : {breakdown['data_cost']} USDC/h（本地数据/知识库均摊）")
-    print(f"   固定     : {breakdown['fixed_cost']} USDC/h")
+    print(f"   知识库   : {breakdown['data_cost']} USDT/h（本地数据/知识库均摊）")
+    print(f"   固定     : {breakdown['fixed_cost']} USDT/h")
     print(f"   ───────────────────────────")
-    print(f"   cost_per_hour = {breakdown['cost_per_hour']} USDC/h")
+    print(f"   cost_per_hour = {breakdown['cost_per_hour']} USDT/h")
 
     # 定价建议
     engine = PricingEngine(breakdown["cost_per_hour"],
                            profit_margin=args.margin, quality_premium=args.premium)
     detail = engine.suggest_with_market(market)
     print(f"\n💡 建议报价 (利润率 {args.margin:.0%}, 质量溢价 {args.premium:.0%}):")
-    print(f"   成本加成价 : {detail['base_price']} USDC/h")
-    print(f"   平台最低价 : {detail.get('min_price_usdt', 1.0)} USDC/h（不足则取最低价）")
+    print(f"   成本加成价 : {detail['base_price']} USDT/h")
+    print(f"   平台最低价 : {detail.get('min_price_usdt', 1.0)} USDT/h（不足则取最低价）")
     if market and market.get("median"):
-        print(f"   市场收敛   : median={market['median']} → 报价 {detail['suggested_price']} USDC/h")
+        print(f"   市场收敛   : median={market['median']} → 报价 {detail['suggested_price']} USDT/h")
     else:
-        print(f"   报价(无行情) = {detail['suggested_price']} USDC/h（成本加成起步）")
+        print(f"   报价(无行情) = {detail['suggested_price']} USDT/h（成本加成起步）")
 
     # 提交
     if args.submit:
@@ -912,7 +912,7 @@ def cmd_pricer(args):
                              data_cost=args.data_cost, fixed_cost=args.fixed_cost,
                              hardware_cost=args.hardware_cost)
     cost = cost_est.estimate()
-    print(f"💰 成本估算: {cost} USDC/h ({args.gpu}/{args.model})")
+    print(f"💰 成本估算: {cost} USDT/h ({args.gpu}/{args.model})")
     pricer = AutoPricer(client, cost_per_hour=cost,
                         profit_margin=args.margin, quality_premium=args.premium,
                         domain=args.domain or config.get("domain", ""),
@@ -921,7 +921,7 @@ def cmd_pricer(args):
     pricer.start(background=True)
     # 立即执行一次，然后驻留
     detail = pricer.tick()
-    print(f"📊 首次调价: {detail['suggested_price']} USDC/h"
+    print(f"📊 首次调价: {detail['suggested_price']} USDT/h"
           f"（市场 median={detail.get('market_median')}, 提交={detail.get('submitted')}）")
     print("   自动调价循环运行中…… (Ctrl+C 停止)")
     try:
@@ -1002,8 +1002,8 @@ def main():
     s.add_argument("--gpu", default="none", help="自动报价：硬件型号（h100/a100/a10/v100/l4/t4/cpu/none）")
     s.add_argument("--model", default="none", help="自动报价：模型（gpt-4o/.../local/none）")
     s.add_argument("--tokens-per-hour", type=int, default=0, help="自动报价：每小时 token 消耗")
-    s.add_argument("--data-cost", type=float, default=0.0, help="自动报价：数据成本均摊 USDC/h")
-    s.add_argument("--fixed-cost", type=float, default=0.0, help="自动报价：固定成本均摊 USDC/h")
+    s.add_argument("--data-cost", type=float, default=0.0, help="自动报价：数据成本均摊 USDT/h")
+    s.add_argument("--fixed-cost", type=float, default=0.0, help="自动报价：固定成本均摊 USDT/h")
     s.add_argument("--hardware-cost", type=float, default=None, help="自动报价：直接指定硬件成本（有云账单）")
     s.add_argument("--margin", type=float, default=0.3, help="自动报价：目标利润率（默认 30%%）")
     s.add_argument("--premium", type=float, default=0.0, help="自动报价：质量溢价")
@@ -1084,8 +1084,8 @@ def main():
     s.add_argument("--gpu", default="none", help="硬件型号：h100/a100/a10/v100/l4/t4/cpu/none（默认 none=纯 API）")
     s.add_argument("--model", default="none", help="模型：gpt-4o/gpt-4o-mini/claude-sonnet/claude-haiku/llama-70b/qwen-72b/deepseek/local/none")
     s.add_argument("--tokens-per-hour", type=int, default=0, help="每小时 token 消耗量（估算 API 成本）")
-    s.add_argument("--data-cost", type=float, default=0.0, help="数据/知识库成本均摊（USDC/h）")
-    s.add_argument("--fixed-cost", type=float, default=0.0, help="固定成本均摊：人力/带宽（USDC/h）")
+    s.add_argument("--data-cost", type=float, default=0.0, help="数据/知识库成本均摊（USDT/h）")
+    s.add_argument("--fixed-cost", type=float, default=0.0, help="固定成本均摊：人力/带宽（USDT/h）")
     s.add_argument("--hardware-cost", type=float, default=None, help="直接指定硬件成本（有云账单时，覆盖 --gpu）")
     s.add_argument("--margin", type=float, default=0.3, help="目标利润率（默认 0.3 = 30%%）")
     s.add_argument("--premium", type=float, default=0.0, help="质量溢价（默认 0，高信誉可加）")

@@ -199,7 +199,7 @@ Hub 存储全部为**公开信息**（地址/公钥/端点/领域/tx_hash），�
 
 | 维度 | 原始设计（txt） | 当前实现 | 状态 |
 |------|----------------|----------|------|
-| 区块链 | Solana + USDC + SOL Gas 代付池 | **BSC + 原生 BNB 微量注册费**（当前 0 USDT 免费），无 Gas 池（免费期内无此需求） | 调整 |
+| 区块链 | Solana + USDC + SOL Gas 代付池 | **BSC 链：BNB 注册费（gas）+ USDT(BEP-20) Agent 间结算**（当前注册费 0 USDT 免费，无 Gas 池） | 调整 |
 | 注册认证 | 链上支付即认证 | 订单状态机（pending→paid→completed）+ 身份签名 + tx 防重用 + /manifest 回查 | 落地+增强 |
 | 注册中心 | Consul/etcd + PostgreSQL/Redis | **单进程 http.server + SQLite**（零依赖、易部署） | 简化 |
 | 通信 | A2A + gRPC/WebSocket + Noise | **HTTP JSON + 自研 X25519/HKDF/ChaCha20-Poly1305**（Noise 简化等价） | 调整 |

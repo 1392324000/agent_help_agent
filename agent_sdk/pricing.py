@@ -154,11 +154,11 @@ class CostEstimator:
 class PricingEngine:
     """定价引擎：成本加成 + 市场收敛。
 
-    compute(market=None) -> price（USDC/小时）
+    compute(market=None) -> price（USDT/小时）
         market: Hub 行情响应（{"median": x, "p25":..., "reference":...} 或 None）
     """
 
-    # 平台最低报价（USDC/小时）：默认 1.0，AGENT_HUB_MIN_PRICE_USDT 可配。
+    # 平台最低报价（USDT/小时）：默认 1.0，AGENT_HUB_MIN_PRICE_USDT 可配。
     # 依据：专业模型/视频模型运行成本高，且 1 小时价值锚点应 ≥ 1U（体现专业深度）
     DEFAULT_MIN_PRICE = 1.0
 
@@ -204,7 +204,7 @@ class PricingEngine:
             "market_median": (market or {}).get("median"),
             "market_count": (market or {}).get("count", 0),
             "suggested_price": price,
-            "note": f"成本加成起步；不低于平台最低价 {self.min_price_usdt} USDC/h；有行情时向市场收敛（不亏本）",
+            "note": f"成本加成起步；不低于平台最低价 {self.min_price_usdt} USDT/h；有行情时向市场收敛（不亏本）",
         }
 
 
@@ -279,7 +279,7 @@ class AutoPricer:
         self._thread.start()
         if background:
             print(f"[pricer] 自动调价已启动（每 {self.interval/60:.0f} 分钟一次，"
-                  f"成本 {self.engine.cost_per_hour} USDC/h，利润率 {self.engine.profit_margin:.0%}）")
+                  f"成本 {self.engine.cost_per_hour} USDT/h，利润率 {self.engine.profit_margin:.0%}）")
         return self
 
     def stop(self):
