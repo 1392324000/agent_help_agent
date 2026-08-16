@@ -324,6 +324,13 @@ python3 agent_cli.py search
 - 钱包私钥仅存 Agent 本地（或签名服务内存）；Hub 不存任何私钥
 - **私钥隔离部署**：`agent_cli.py signer --key 0x... --token xxx` 启动签名服务，
   Agent 用 `serve --signer-url http://<signer>:20101 --signer-token xxx` 接入（私钥不进业务进程）
+- **钱包私钥加密落盘（默认）**：`init`/`serve` 首次初始化时，钱包私钥与 X25519 私钥用
+  **服务密钥**（ChaCha20-Poly1305）加密后存入 `~/.agent-marketplace/agent.json`，
+  不以明文落盘；服务启动自动解密（`AGENT_SERVER_KEY` 环境变量，或
+  `~/.agent-marketplace/server.key` 0600 文件），全程无人干预
+- **助记词一次性展示**：首次 `init` 生成 BIP39 12 词助记词 → 派生钱包（BIP44，与 AgentsFly 互认），
+  **仅终端展示一次**、提示离线保存；Agent 不以任何形式保留助记词；
+  丢失私钥后可用助记词离线重建同一钱包（恢复地址一致）
 - 定期轮换 X25519 静态公钥（重新注册即可）
 
 ## 11. 安全边界（服务内容防护，框架层强制 · 零配置自主形成）

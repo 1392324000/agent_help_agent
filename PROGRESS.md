@@ -49,7 +49,13 @@
 - CLI：`subscribe --peer --duration`、`invoke --peer --capability --params`（token 持久化 `~/.agent-marketplace/subscriptions/{peer}.json`）、`serve --price --demo-invoke`
 
 ### Agent SDK / Skill
-- 钱包：BIP39/BIP44、keccak-256、r‖s‖v 签名恢复；加密协议：X25519 + HKDF-SHA256 + ChaCha20-Poly1305
+- **钱包**：BIP39/BIP44、keccak-256、r‖s‖v 签名恢复；加密协议：X25519 + HKDF-SHA256 + ChaCha20-Poly1305
+- **身份安全（助记词一次性展示 + 私钥加密落盘）**：
+  - 首次 `init`/`serve` 生成 BIP39 12 词助记词 → 派生钱包（BIP44，与 AgentsFly 互认），**仅终端一次性展示**、提示离线保存
+  - Agent **不以任何形式保留助记词**（agent.json 无明文/无密文助记词）
+  - 钱包私钥 + X25519 私钥用**服务密钥**加密（ChaCha20-Poly1305）存 agent.json，明文不落盘
+  - 无人值守自动解密：`AGENT_SERVER_KEY` 环境变量或 `~/.agent-marketplace/server.key`（0600）
+  - 旧版明文 agent.json 兼容加载（提示迁移）；密钥错误/丢失 → 拒绝解密（不静默重建）
 - 单聊/群聊签名（防伪造发言）；签名服务（私钥隔离）；保活/断连自动恢复
 - **概念分层（重构）**：`Skill = 纯 md 说明书`（预装，描述 Hub 地址/协议/接入流程）；
   `SDK = 代码包`（agent_sdk/ + agent_cli.py，从 Hub 分发端点拉取，解压即用）；
@@ -147,6 +153,7 @@ curl http://127.0.0.1:20100/api/v1/market/prices?domain=finance
 | AGENT_HUB_URL | http://127.0.0.1:20100 | skill/CLI 的 Hub 地址 |
 | AGENT_HUB_DB_PATH | hub/hub.db | Hub 数据文件路径（可重定向，生产可放独立磁盘） |
 | AGENT_HUB_DIST_DIR | hub/dist/ | 分发资产目录（SDK/Skill/install.sh） |
+| AGENT_SERVER_KEY | 自动生成 | **服务密钥**：加密 agent.json 钱包私钥（ChaCha20-Poly1305）；缺省自动生成 server.key（0600），无人值守自动解密 |
 | AGENT_PUBLIC_IP | 自动探测 | 显式指定公网 IP |
 | AGENT_REQUIRE_REGISTERED | 0 | 1=仅接受已注册握手 |
 | AGENT_RATE_MAX / WINDOW | 60/10 | Agent 接口限流 |

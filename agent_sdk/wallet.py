@@ -100,6 +100,13 @@ def keccak256(data: bytes) -> bytes:
 # 钱包
 # ---------------------------------------------------------------------------
 
+def generate_mnemonic(strength: int = 128) -> str | None:
+    """生成 BIP39 英文助记词（默认 12 词）。缺 mnemonic 依赖返回 None。"""
+    if not HAS_MNEMONIC:
+        return None
+    return Mnemonic("english").generate(strength=strength)
+
+
 class Wallet:
     CURVE = ec.SECP256K1
 
@@ -116,6 +123,11 @@ class Wallet:
             acct = Account.from_mnemonic(mnemonic.strip())
             return cls.from_private_hex(acct.key.hex())
         return cls()
+
+    @classmethod
+    def from_mnemonic(cls, mnemonic: str) -> "Wallet":
+        """按 BIP44 从助记词恢复钱包（与 AgentsFly 钱包体系互认）。"""
+        return cls.generate(mnemonic)
 
     @classmethod
     def from_private_hex(cls, hex_key: str) -> "Wallet":

@@ -73,6 +73,16 @@ CLI="$WORK_DIR/agent_cli.py"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
+# 优先使用带助记词依赖的 python（eth_account+mnemonic → BIP39 助记词备份），
+# 否则回退 python3（钱包仍可用，但无一次性助记词展示）
+PYTHON="python3"
+for _cand in "$HOME/.fly/venv/bin/python3" /root/.fly/venv/bin/python3; do
+  if [ -x "$_cand" ] && "$_cand" -c "import eth_account, mnemonic" >/dev/null 2>&1; then
+    PYTHON="$_cand"; break
+  fi
+done
+echo "==> Python: $PYTHON"
+
 echo "==> Hub 注册中心 : $HUB_URL"
 echo "==> 拉取资产清单 ..."
 curl -fsSL --max-time 10 "$HUB_URL/api/v1/dist" -o "$TMP/dist.json" \
@@ -94,7 +104,7 @@ test -f "$WORK_DIR/agent_sdk/__init__.py" && test -f "$CLI" \
   || { echo "❌ SDK 解压校验失败"; exit 1; }
 
 echo "==> 初始化身份（生成钱包，持久化 ~/.agent-marketplace/agent.json）..."
-python3 "$CLI" --hub "$HUB_URL" init \
+$PYTHON "$CLI" --hub "$HUB_URL" init \
   || { echo "❌ 身份初始化失败"; exit 1; }
 
 if [[ "$AUTO_SERVE" -eq 1 ]]; then
@@ -104,7 +114,7 @@ if [[ "$AUTO_SERVE" -eq 1 ]]; then
   echo "  领域: $DOMAIN/$SUBDOMAIN | 技能: $SKILLS | 报价: $PRICE USDT/h | 端口: $PORT"
   echo "  停止: Ctrl+C（后台运行: nohup ... & 或 systemd 托管）"
   echo "=================================================="
-  exec python3 "$CLI" --hub "$HUB_URL" serve \
+  exec $PYTHON "$CLI" --hub "$HUB_URL" serve \
     --port "$PORT" --domain "$DOMAIN" --subdomain "$SUBDOMAIN" \
     --skills "$SKILLS" --price "$PRICE" --auto-price
 fi

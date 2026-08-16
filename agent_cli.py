@@ -24,6 +24,7 @@ Agent Marketplace CLI —— 智能体接入平台的一键工具
 运行环境：Python 3.10+，依赖 cryptography（~/.fly/venv 已装）。
 """
 import argparse
+import hashlib
 import json
 import os
 import sys
@@ -48,10 +49,163 @@ from agent_sdk import HubClient, AgentServer, KeyPair, Wallet
 HUB_URL = os.environ.get("AGENT_HUB_URL", "http://127.0.0.1:20100")
 
 
-def _client(wallet_key: str | None = None) -> tuple[HubClient, Wallet, KeyPair]:
-    wallet = Wallet.from_private_hex(wallet_key) if wallet_key else Wallet.generate()
-    keys = KeyPair()
+def _client(args=None, wallet_key: str | None = None) -> tuple[HubClient, Wallet, KeyPair]:
+    """构造 HubClient。
+
+    钱包来源优先级：
+      1. wallet_key 明文参数（--wallet-key）
+      2. agent.json 已存身份 → 解密加载（口令：--passphrase / AGENT_WALLET_PASSPHRASE / 交互）
+      3. 无身份 → 全新生成（助记词一次性展示 + 私钥口令加密落盘）
+    纯查询（info/search/manifest）不传 args：临时身份，不落盘。
+    """
+    if wallet_key:
+        wallet = Wallet.from_private_hex(wallet_key)
+        keys = KeyPair()
+        return HubClient(HUB_URL, wallet, keys), wallet, keys
+    if args is not None:
+        config_path = getattr(args, "config", None) or os.path.expanduser("~/.agent-marketplace/agent.json")
+        config = {}
+        if os.path.exists(config_path):
+            try:
+                config = json.load(open(config_path))
+            except Exception:
+                config = {}
+        if config.get("wallet_enc") or config.get("wallet_key"):
+            wallet, keys = _load_identity(config, args)
+        else:
+            wallet, keys, _ = _create_identity(args, config_path)
+        return HubClient(HUB_URL, wallet, keys), wallet, keys
+    wallet, keys = Wallet.generate(), KeyPair()
     return HubClient(HUB_URL, wallet, keys), wallet, keys
+
+
+# ---------------------------------------------------------------------------
+# 钱包身份：助记词一次性展示 + 私钥服务密钥加密落盘（agent.json）
+# ---------------------------------------------------------------------------
+# 安全要求（无人值守场景）：
+#   · 首次初始化生成 BIP39 助记词（12 词）→ 派生钱包（BIP44，与 AgentsFly 互认）
+#   · 助记词仅终端一次性展示，Agent 不以任何形式保留（不落盘）
+#   · 钱包私钥 + X25519 私钥用"服务密钥"加密（ChaCha20-Poly1305）存 agent.json，
+#     服务启动自动解密（AGENT_SERVER_KEY 环境变量 / ~/.agent-marketplace/server.key），
+#     全程无人干预
+
+
+def _server_key(args=None, create: bool = True) -> bytes:
+    """服务密钥：AGENT_SERVER_KEY 环境变量优先，否则 ~/.agent-marketplace/server.key。
+    不存在时生成 32B 随机并落盘（0600，仅属主可读）。"""
+    env = os.environ.get("AGENT_SERVER_KEY", "")
+    if env:
+        try:
+            return bytes.fromhex(env) if len(env) == 64 else hashlib.sha256(env.encode("utf-8")).digest()
+        except Exception:
+            return hashlib.sha256(env.encode("utf-8")).digest()
+    path = os.path.expanduser("~/.agent-marketplace/server.key")
+    if os.path.exists(path):
+        try:
+            return bytes.fromhex(open(path).read().strip())
+        except Exception:
+            pass
+    if not create:
+        print("❌ 未找到服务密钥（AGENT_SERVER_KEY 环境变量或 ~/.agent-marketplace/server.key）")
+        sys.exit(1)
+    key = os.urandom(32)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w") as f:
+        f.write(key.hex())
+    os.chmod(path, 0o600)
+    print(f"🔑 已生成服务密钥 {path}（0600）——用于加密 agent.json 中的钱包私钥")
+    return key
+
+
+def _identity_enc(wallet: Wallet, keys: KeyPair, server_key: bytes) -> dict:
+    """钱包私钥 + X25519 私钥用服务密钥加密（不落盘助记词/明文私钥）。"""
+    from agent_sdk.crypto import key_encrypt
+    return {
+        "encrypted": True,
+        "wallet_enc": key_encrypt(wallet.private_hex.encode("utf-8"), server_key),
+        "keys_enc": key_encrypt(keys.private_b64.encode("utf-8"), server_key),
+    }
+
+
+def _load_identity(config: dict, args) -> tuple[Wallet, KeyPair]:
+    """从 agent.json 加载身份：优先解密 wallet_enc（服务密钥自动解密），兼容旧版明文 wallet_key。"""
+    from agent_sdk.crypto import key_decrypt
+    if config.get("wallet_enc"):
+        server_key = _server_key(args, create=False)
+        try:
+            wk = key_decrypt(config["wallet_enc"], server_key).decode("utf-8")
+            wallet = Wallet.from_private_hex(wk)
+        except Exception:
+            print("❌ 服务密钥不匹配或密文损坏，无法解密钱包私钥"
+                  "（请检查 AGENT_SERVER_KEY / ~/.agent-marketplace/server.key）")
+            sys.exit(1)
+        keys = KeyPair()
+        if config.get("keys_enc"):
+            try:
+                keys = KeyPair.from_private_b64(key_decrypt(config["keys_enc"], server_key).decode("utf-8"))
+            except Exception:
+                print("⚠ keys_enc 解密失败，X25519 密钥将重新生成（公钥变化会影响已有加密会话）")
+        return wallet, keys
+    wk = config.get("wallet_key", "")
+    if wk:
+        keys = KeyPair.from_private_b64(config.get("keys_private", "")) if config.get("keys_private") else KeyPair()
+        return Wallet.from_private_hex(wk), keys
+    print("❌ 未找到钱包身份（agent.json 无 wallet_enc/wallet_key），请先 init")
+    sys.exit(1)
+
+
+def _wallet_keys_from_config(args, config) -> tuple[Wallet, KeyPair]:
+    """从配置加载钱包+X25519：--wallet-key 明文优先，否则 agent.json 服务密钥解密。"""
+    if getattr(args, "wallet_key", ""):
+        wallet = Wallet.from_private_hex(args.wallet_key)
+        keys = KeyPair.from_private_b64(config.get("keys_private", "")) if config.get("keys_private") else KeyPair()
+        return wallet, keys
+    return _load_identity(config, args)
+
+
+def _print_mnemonic(mnemonic: str):
+    """一次性展示助记词（不落盘）。"""
+    print()
+    print("=" * 64)
+    print("  🔑 钱包助记词（仅本次显示，请立即离线抄写保存！）")
+    print("=" * 64)
+    print(f"  {mnemonic}")
+    print("=" * 64)
+    print("  · 助记词可离线重建钱包（BIP44），是丢失私钥后的唯一恢复手段")
+    print("  · Agent 不会以任何形式保存助记词——本次输出即唯一机会")
+    print("  · 任何索要助记词的消息/链接都是诈骗")
+    print()
+
+
+def _create_identity(args, config_path: str) -> tuple[Wallet, KeyPair, dict]:
+    """全新身份：助记词派生 + 一次性展示 + 私钥服务密钥加密落盘。返回 (wallet, keys, config)。"""
+    from agent_sdk.wallet import generate_mnemonic
+    if args.wallet_key:
+        wallet = Wallet.from_private_hex(args.wallet_key)
+        print("⚠ 使用 --wallet-key 指定私钥（无一次性助记词展示）")
+    else:
+        mnemonic = generate_mnemonic()
+        if mnemonic:
+            wallet = Wallet.from_mnemonic(mnemonic)
+            _print_mnemonic(mnemonic)
+        else:
+            wallet = Wallet.generate()
+            print("⚠ 缺少 mnemonic/eth_account 依赖，无法生成助记词；建议安装后重新 init 以支持助记词备份")
+    keys = KeyPair()
+    server_key = _server_key(args)
+    config = {
+        "agent_id": wallet.address,
+        "public_key": keys.public_b64,
+        **_identity_enc(wallet, keys, server_key),
+        "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+    }
+    with open(config_path, "w") as f:
+        json.dump(config, f, ensure_ascii=False, indent=2)
+    os.chmod(config_path, 0o600)
+    print(f"✅ 身份已加密保存: {config_path}")
+    print(f"   agent_id : {wallet.address}")
+    print(f"   私钥加密 : ChaCha20-Poly1305（服务密钥自动解密，无人干预）；明文私钥/助记词均未落盘")
+    return wallet, keys, config
 
 
 # ---------------------------------------------------------------------------
@@ -63,12 +217,13 @@ def cmd_info(args):
 
 
 def cmd_init(args):
-    """初始化智能体端：生成/加载钱包身份并持久化（不注册、不启动服务）。
+    """初始化智能体端：生成钱包身份并加密持久化（不注册、不启动服务）。
 
-    供 SDK 从 Hub 分发拉取后的一键初始化：
-        python3 agent_cli.py init
-    生成 ~/.agent-marketplace/agent.json（钱包私钥 + X25519 加密密钥对），
-    身份固定，此后 serve/register 复用同一身份，重启不变。
+    首次初始化：
+      - 生成 BIP39 助记词（12 词）→ 派生钱包（BIP44，与 AgentsFly 互认）
+      - 一次性打印助记词，提示离线保存（Agent 不以任何形式保留助记词）
+      - 钱包私钥 + X25519 私钥用服务密钥加密（ChaCha20-Poly1305）落盘，无人值守自动解密
+    已存在身份（幂等）：自动解密验证并打印 agent_id，不重新生成。
     """
     import os as _os
     config_dir = _os.path.expanduser("~/.agent-marketplace")
@@ -82,34 +237,20 @@ def cmd_init(args):
         except Exception:
             config = {}
 
-    # ---- 钱包（优先 wallet-key > 已有配置 > 新建） ----
-    if args.wallet_key:
-        wallet = Wallet.from_private_hex(args.wallet_key)
-        config["wallet_key"] = args.wallet_key
-    elif config.get("wallet_key"):
-        wallet = Wallet.from_private_hex(config["wallet_key"])
-    else:
-        wallet = Wallet.generate()
-        config["wallet_key"] = wallet.private_hex
+    # ---- 已存在身份：幂等加载（自动解密验证） ----
+    if config.get("wallet_enc") or config.get("wallet_key"):
+        wallet, _ = _load_identity(config, args)
+        print(f"✅ 身份已存在（幂等，不重新生成）: {wallet.address}")
+        print(f"   配置: {config_path}（{'服务密钥加密存储' if config.get('wallet_enc') else '旧版明文存储，建议重新 init 迁移' }）")
+        return
 
-    # ---- X25519 加密密钥对（持久化，公钥不变） ----
-    if config.get("keys_private"):
-        keys = KeyPair.from_private_b64(config["keys_private"])
-    else:
-        keys = KeyPair()
-        config["keys_private"] = keys.private_b64
-
-    config["agent_id"] = wallet.address
-    config["public_key"] = keys.public_b64
-    _os.chmod(config_path, 0o600) if _os.path.exists(config_path) else None
-    with open(config_path, "w") as f:
-        json.dump(config, f, ensure_ascii=False, indent=2)
-    _os.chmod(config_path, 0o600)
+    # ---- 新身份：助记词派生 + 加密落盘 ----
+    wallet, keys, _ = _create_identity(args, config_path)
 
     print("=" * 56)
     print(" 智能体端初始化完成 ✅")
     print("=" * 56)
-    print(f"  身份文件 : {config_path}（0600，含钱包私钥，勿泄露）")
+    print(f"  身份文件 : {config_path}（0600，私钥已加密，助记词未落盘）")
     print(f"  agent_id : {wallet.address}")
     print(f"  加密公钥 : {keys.public_b64[:24]}…")
     print(f"  Hub      : {HUB_URL}")
@@ -118,12 +259,12 @@ def cmd_init(args):
     print(f"    python3 {_os.path.basename(__file__)} serve \\")
     print("      --domain finance --subdomain quantitative_trading \\")
     print("      --skills backtesting --price 0.005 --auto-price")
-    print("  身份已固定：重启/重建后 serve 自动恢复，无需重新 init")
+    print("  身份已固定：重启/重建后 serve 自动恢复（服务密钥自动解密），无需重新 init")
     print("=" * 56)
 
 
 def cmd_register(args):
-    client, wallet, _ = _client(args.wallet_key)
+    client, wallet, _ = _client(args, args.wallet_key)
     skills = [s.strip() for s in (args.skills or "").split(",") if s.strip()]
     if args.endpoint == "auto":
         endpoint = client.auto_endpoint(args.port)   # 公网 IP:20102
@@ -221,24 +362,26 @@ def cmd_serve(args):
         except Exception:
             config = {}
 
-    # ---- 钱包（支持签名服务 / wallet-key / 配置持久化） ----
+    # ---- 钱包（签名服务 > wallet-key > 配置解密恢复 > 新建加密） ----
+    keys = None
     if args.signer_url:
         wallet = WalletSignerClient(args.signer_url, token=args.signer_token)
         print(f"🔒 使用远程签名服务 {args.signer_url}（本进程不持有私钥）")
     elif args.wallet_key:
         wallet = Wallet.from_private_hex(args.wallet_key)
-    elif config.get("wallet_key"):
-        wallet = Wallet.from_private_hex(config["wallet_key"])
+    elif config.get("wallet_enc") or config.get("wallet_key"):
+        wallet, keys = _load_identity(config, args)
+        print(f"🔑 钱包身份已解密恢复: {wallet.address[:14]}…（服务密钥自动解密）")
     else:
-        wallet = Wallet.generate()
-        config["wallet_key"] = wallet.private_hex  # 0600 文件持久化（Agent 重启身份不变）
+        wallet, keys, config = _create_identity(args, config_path)
 
     # ---- X25519 加密密钥（持久化，重启公钥不变） ----
-    if config.get("keys_private"):
-        keys = KeyPair.from_private_b64(config["keys_private"])
-    else:
-        keys = KeyPair()
-        config["keys_private"] = keys.private_b64
+    if keys is None:
+        if config.get("keys_private"):
+            keys = KeyPair.from_private_b64(config["keys_private"])
+        else:
+            keys = KeyPair()
+            config["keys_private"] = keys.private_b64
 
     client = HubClient(HUB_URL, wallet, keys)
     if config.get("agent_token"):
@@ -334,7 +477,7 @@ def cmd_serve(args):
 
 
 def cmd_private(args):
-    client, wallet, keys = _client(args.wallet_key)
+    client, wallet, keys = _client(args, args.wallet_key)
     peer = args.peer.lower()
     print(f"向 {peer[:14]}… 申请加密单聊……")
     session = client.open_private(peer, purpose=args.purpose)
@@ -346,9 +489,17 @@ def cmd_private(args):
 
 def cmd_signer(args):
     from agent_sdk import WalletSignerServer
-    if not args.key:
-        print("❌ 需要钱包私钥：--key 0x... 或 AGENT_WALLET_KEY"); sys.exit(1)
-    srv = WalletSignerServer(Wallet.from_private_hex(args.key), port=args.port, token=args.token)
+    if args.key:
+        wallet = Wallet.from_private_hex(args.key)
+    else:
+        # 从 agent.json 解密加载（服务密钥自动解密；私钥仅存本服务内存）
+        config_path = args.config or os.path.expanduser("~/.agent-marketplace/agent.json")
+        if not os.path.exists(config_path):
+            print("❌ 需要私钥：--key 0x... / AGENT_WALLET_KEY，或先 init 后用 --config 从加密配置加载")
+            sys.exit(1)
+        config = json.load(open(config_path))
+        wallet, _ = _load_identity(config, args)
+    srv = WalletSignerServer(wallet, port=args.port, token=args.token)
     srv.start(background=True)
     print(f"🔒 钱包签名服务 :{args.port}  address={srv.wallet.address}")
     print(f"   私钥仅存本服务内存，Agent 通过 HTTP 签名，私钥不离开本进程")
@@ -362,8 +513,7 @@ def cmd_renew(args):
     if not _os.path.exists(config_path):
         print("❌ 未找到注册配置，请先 serve 注册"); sys.exit(1)
     config = json.load(open(config_path))
-    wallet = Wallet.from_private_hex(args.wallet_key or config.get("wallet_key", ""))
-    keys = KeyPair.from_private_b64(config.get("keys_private", "")) if config.get("keys_private") else KeyPair()
+    wallet, keys = _wallet_keys_from_config(args, config)
     client = HubClient(HUB_URL, wallet, keys)
     client.agent_token = config.get("agent_token")
     print(f"续费 {config.get('agent_id','')[:14]}…（token 鉴权）……")
@@ -391,7 +541,7 @@ def _sub_token_path(peer: str) -> str:
 
 def cmd_subscribe(args):
     """向服务方订阅（USDT 结算）：申请订单→转账→提交→确认→验签 token。"""
-    client, wallet, _ = _client(args.wallet_key)
+    client, wallet, _ = _client(args, args.wallet_key)
     peer = args.peer.lower()
     manifest = client.get_peer_manifest(peer)
     caps = manifest.get("capabilities", {})
@@ -424,7 +574,7 @@ def cmd_subscribe(args):
 
 def cmd_invoke(args):
     """带订阅 token 调用服务方能力（需求=参数，产物=返回值）。"""
-    client, _, _ = _client(args.wallet_key)
+    client, _, _ = _client(args, args.wallet_key)
     peer = args.peer.lower()
     token = None
     if args.token_file:
@@ -469,8 +619,7 @@ def cmd_pricing(args):
     """查看/估算/提交报价：cost=成本估算，market=行情，submit=提交。"""
     from agent_sdk.pricing import CostEstimator, PricingEngine
     config = _load_config(args)
-    wallet = Wallet.from_private_hex(args.wallet_key or config.get("wallet_key", ""))
-    keys = KeyPair.from_private_b64(config.get("keys_private", "")) if config.get("keys_private") else KeyPair()
+    wallet, keys = _wallet_keys_from_config(args, config)
     client = HubClient(HUB_URL, wallet, keys)
     client.agent_token = config.get("agent_token")
     domain = args.domain or config.get("domain", "")
@@ -535,8 +684,7 @@ def cmd_pricer(args):
     """启动自动调价：后台循环拉行情→算价→提交，无需人工干预。"""
     from agent_sdk.pricing import CostEstimator, AutoPricer
     config = _load_config(args)
-    wallet = Wallet.from_private_hex(args.wallet_key or config.get("wallet_key", ""))
-    keys = KeyPair.from_private_b64(config.get("keys_private", "")) if config.get("keys_private") else KeyPair()
+    wallet, keys = _wallet_keys_from_config(args, config)
     client = HubClient(HUB_URL, wallet, keys)
     client.agent_token = config.get("agent_token")
     if not client.agent_token:
@@ -662,6 +810,7 @@ def main():
     s = sub.add_parser("signer", help="启动钱包签名服务（私钥隔离，Agent 不持私钥）")
     s.add_argument("--port", type=int, default=int(os.environ.get("AGENT_SIGNER_PORT", "20101")))
     s.add_argument("--key", default=os.environ.get("AGENT_WALLET_KEY", ""), help="钱包私钥 hex")
+    s.add_argument("--config", help="从 agent.json 解密加载私钥（服务密钥自动解密）")
     s.add_argument("--token", default=os.environ.get("AGENT_SIGNER_TOKEN", ""), help="鉴权令牌")
     s.set_defaults(fn=cmd_signer)
 

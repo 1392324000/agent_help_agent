@@ -37,6 +37,35 @@ GROUP_KEY_BYTES = 32
 
 
 # ---------------------------------------------------------------------------
+# 服务密钥加密（钱包私钥落盘）：ChaCha20-Poly1305，密钥由微服务持有
+# ---------------------------------------------------------------------------
+# 无人值守场景不使用口令（会卡自动化）：钱包私钥用"服务密钥"加密落盘，
+# 服务启动时自动读取密钥解密（AGENT_SERVER_KEY 环境变量，或
+# ~/.agent-marketplace/server.key 文件），全程无人干预。
+# 助记词仍一次性展示、不落盘。
+
+
+def _norm_key(key: bytes) -> bytes:
+    """归一化为 32 字节 ChaCha20 密钥（非 32B 时 SHA-256 派生）。"""
+    if len(key) == 32:
+        return key
+    return hashlib.sha256(key).digest()
+
+
+def key_encrypt(plaintext: bytes, key: bytes) -> dict:
+    """服务密钥加密。返回 JSON 友好 dict（nonce/data 为 hex），供 agent.json 落盘。"""
+    nonce = secrets.token_bytes(NONCE_BYTES)
+    data = ChaCha20Poly1305(_norm_key(key)).encrypt(nonce, plaintext, None)
+    return {"cipher": "chacha20-poly1305", "nonce": nonce.hex(), "data": data.hex()}
+
+
+def key_decrypt(enc: dict, key: bytes) -> bytes:
+    """服务密钥解密。密钥错误 / 密文损坏抛异常（由调用方处理）。"""
+    return ChaCha20Poly1305(_norm_key(key)).decrypt(bytes.fromhex(enc["nonce"]),
+                                                    bytes.fromhex(enc["data"]), None)
+
+
+# ---------------------------------------------------------------------------
 # 工具
 # ---------------------------------------------------------------------------
 
