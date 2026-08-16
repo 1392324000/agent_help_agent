@@ -31,6 +31,10 @@ _SECP256K1_N = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD036414
 # 链配置（完整 EVM：任意链可配，预设常用链）
 # ---------------------------------------------------------------------------
 
+# 单笔交易 gas 预算（BNB）：BSC 当前费率下 native 转账 ~0.000001、USDT 合约 ~0.000002
+TX_GAS_BUDGET_BNB = 0.000002  # 支付流程：单笔交易 gas 0.000002 BNB 足够
+TX_GAS_BUDGET_WEI = int(TX_GAS_BUDGET_BNB * 1e18)
+
 class ChainConfig:
     def __init__(self, name: str, chain_id: int, rpc_urls: list[str],
                  native_symbol: str = "BNB", native_decimals: int = 18,

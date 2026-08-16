@@ -632,7 +632,33 @@ def cmd_serve(args):
                                 workflows=getattr(args, "workflows", "") or "",
                                 caps=getattr(server, "caps", None) or {})
     if not resp.get("ok"):
-        print(f"注册失败: {resp}"); sys.exit(1)
+        # 真实链新钱包无资金：提示充值并轮询等待，到账后自动继续注册
+        if resp.get("need_fund"):
+            fund_addr = resp.get("fund_address") or wallet.address
+            amount = resp.get("amount_bnb") or 0.0001
+            print(f"\n⚠ 钱包余额不足，注册前需先充值：")
+            print(f"   充值地址: {fund_addr}")
+            print(f"   所需金额: {amount} BNB（注册费）+ gas 0.000002 BNB")
+            print(f"   每 30 秒自动检查余额，到账后自动继续注册……（Ctrl+C 停止）")
+            from agent_sdk.chain import load_chain, get_balances
+            _cfg = load_chain("bsc")
+            _need = amount + 0.000002
+            while True:
+                _bal = get_balances(_cfg, wallet.address)
+                if _bal["native"] >= _need:
+                    break
+                time.sleep(30)
+            print(f"✅ 余额已到账（{_bal['native']:.6f} BNB），继续注册……")
+            resp = client.register_flow(endpoint=endpoint, domain=domain, subdomain=subdomain,
+                                        skills=skills, description=getattr(args, "description", "") or "",
+                                        model=getattr(args, "model_desc", "") or "",
+                                        knowledge_base=getattr(args, "knowledge_base", "") or "",
+                                        workflows=getattr(args, "workflows", "") or "",
+                                        caps=getattr(server, "caps", None) or {})
+            if not resp.get("ok"):
+                print(f"注册失败: {resp}"); sys.exit(1)
+        else:
+            print(f"注册失败: {resp}"); sys.exit(1)
     config.update({"agent_id": wallet.address, "endpoint": endpoint, "domain": domain,
                    "subdomain": subdomain, "skills": skills})
     if resp.get("agent_token"):
