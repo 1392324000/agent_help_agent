@@ -64,6 +64,10 @@ MODEL_API_COSTS = {
     "local": 0.0,   # 本地模型（已含在硬件成本）
     "none": 0.0,
 }
+# 在线模型无用量参数时的默认密度（tokens/小时，可配 AGENT_DEFAULT_TOKENS_PER_HOUR）：
+# 约 400k tokens/h ≈ 每分钟 ~6.7k（常规对话/检索服务；高密度流式请显式 --tokens-per-hour）
+DEFAULT_TOKENS_PER_HOUR = int(os.environ.get("AGENT_DEFAULT_TOKENS_PER_HOUR", "400000"))
+
 # 视频生成模型：按次/按生成量计费，折算为每小时运行成本（GPU 渲染远贵于 token 模型）
 VIDEO_MODEL_COSTS = {
     "video-gen": 40.0,   # 通用视频生成（Sora/Veo/Kling 类 API 折算）
@@ -109,16 +113,28 @@ class CostEstimator:
         api = self._api_cost()
         return round(hw + api + self.data_cost + self.fixed_cost, 6)
 
+    def _tokens(self) -> tuple[int, bool]:
+        """(tokens_per_hour, 是否默认密度估算)。
+        在线 API 模型（非 local/none）未给用量 → 按默认密度估算（避免静默按 0 低估成本）。"""
+        if self.tokens_per_hour > 0:
+            return self.tokens_per_hour, False
+        if self.model in MODEL_API_COSTS and self.model not in ("local", "none") \
+                and MODEL_API_COSTS.get(self.model, 0) > 0:
+            return DEFAULT_TOKENS_PER_HOUR, True
+        return 0, False
+
     def breakdown(self) -> dict:
         """成本构成明细（展示用）。"""
         if self.hardware_cost is not None:
             hw = max(0.0, float(self.hardware_cost))
         else:
             hw = HARDWARE_COSTS.get(self.gpu, 0.0)
+        tph, est = self._tokens()
         api = self._api_cost()
         return {
             "gpu": self.gpu, "model": self.model,
-            "tokens_per_hour": self.tokens_per_hour,
+            "tokens_per_hour": tph,
+            "estimated_density": est,          # True = 用量按默认密度估算
             "hardware": round(hw, 6),
             "model_api": round(api, 6),
             "data_cost": round(self.data_cost, 6),
@@ -128,10 +144,11 @@ class CostEstimator:
 
     def _api_cost(self) -> float:
         """模型 API 每小时成本：视频生成模型按小时折算（与 token 无关）；
-        token 模型 = 单价/百万 × 每小时 token 消耗。"""
+        token 模型 = 单价/百万 × 每小时 token 消耗（无用量时按默认密度）。"""
         if self.model in VIDEO_MODEL_COSTS:
             return VIDEO_MODEL_COSTS[self.model]
-        return MODEL_API_COSTS.get(self.model, 0.0) * self.tokens_per_hour / 1_000_000
+        tph, _ = self._tokens()
+        return MODEL_API_COSTS.get(self.model, 0.0) * tph / 1_000_000
 
 
 class PricingEngine:

@@ -676,10 +676,20 @@ def _load_config(args) -> dict:
 
 
 def cmd_pricing(args):
-    """查看/估算/提交报价：cost=成本估算，market=行情，submit=提交。"""
+    """查看/估算/提交报价：cost=成本估算，market=行情，submit=提交。
+    估算/行情不需要身份；--submit 才需要注册配置（token 鉴权）。"""
     from agent_sdk.pricing import CostEstimator, PricingEngine
-    config = _load_config(args)
-    wallet, keys = _wallet_keys_from_config(args, config)
+    config = {}
+    config_path = args.config or os.path.expanduser("~/.agent-marketplace/agent.json")
+    if os.path.exists(config_path):
+        try:
+            config = json.load(open(config_path))
+        except Exception:
+            config = {}
+    if config.get("wallet_enc") or args.wallet_key:
+        wallet, keys = _wallet_keys_from_config(args, config)
+    else:
+        wallet, keys = Wallet.generate(), KeyPair()   # 临时身份（仅查询/估算）
     client = HubClient(HUB_URL, wallet, keys)
     client.agent_token = config.get("agent_token")
     domain = args.domain or config.get("domain", "")
@@ -705,10 +715,20 @@ def cmd_pricing(args):
                              data_cost=args.data_cost, fixed_cost=args.fixed_cost,
                              hardware_cost=args.hardware_cost)
     breakdown = cost_est.breakdown()
-    print(f"\n💰 成本估算 ({args.gpu}/{args.model}):")
-    print(f"   硬件     : {breakdown['hardware']} USDC/h")
-    print(f"   模型 API : {breakdown['model_api']} USDC/h")
-    print(f"   数据     : {breakdown['data_cost']} USDC/h")
+    # 运行模式判定：本地推理 / 在线 API / 混合
+    api_model = args.model in ("deepseek", "deepseek-v4-flash", "deepseek-v4-pro",
+                               "gpt-4o", "gpt-4o-mini", "claude-sonnet", "claude-opus",
+                               "claude-haiku", "llama-70b", "qwen-72b")
+    mode = ("本地推理（GPU 跑模型）" if args.model in ("local", "none") and args.gpu != "none"
+            else "在线模型 API（token 计费）+ 本地知识库" if api_model
+            else "混合（本地 GPU + API 模型）" if args.gpu != "none" and api_model
+            else "视频生成模型（按小时折算）" if args.model in ("video-gen", "sora", "veo", "kling")
+            else "在线模型 API")
+    print(f"\n💰 成本估算 ({args.gpu}/{args.model}) · 运行模式: {mode}")
+    print(f"   硬件     : {breakdown['hardware']} USDC/h（本地 GPU/服务器）")
+    print(f"   模型 API : {breakdown['model_api']} USDC/h（{breakdown['tokens_per_hour']} tokens/h"
+          + ("，默认密度估算，请用 --tokens-per-hour 校正 ⚠" if breakdown.get("estimated_density") else "）"))
+    print(f"   知识库   : {breakdown['data_cost']} USDC/h（本地数据/知识库均摊）")
     print(f"   固定     : {breakdown['fixed_cost']} USDC/h")
     print(f"   ───────────────────────────")
     print(f"   cost_per_hour = {breakdown['cost_per_hour']} USDC/h")
