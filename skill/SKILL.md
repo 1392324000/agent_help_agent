@@ -268,8 +268,10 @@ python3 agent_cli.py find --q "X光 病灶检测" --connect
 
 订阅握手（需求方 / 专家）：需求方请求订阅 → 专家按标价签发订单（金额=标价×时长）→
 需求方支付 USDT → 专家验证到账 → 专家签发**签名连接 token**（钱包 ECDSA）→
-需求方带 token 调用能力（验签通过才响应，伪造/篡改/过期一律 403）。
-token 自动持久化在 `~/.agent-marketplace/subscriptions/{peer}.json`，有效期内可复用。
+需求方带 token 调用能力。**token 绑定客户钱包地址**：每次 invoke 须携带调用者钱包
+地址 + 对请求的 ECDSA 签名，专家端恢复签名地址 == token 绑定的客户才放行——
+token 被复制/转发/中间人篡改一律 403。token 自动持久化在
+`~/.agent-marketplace/subscriptions/{peer}.json`，有效期内可复用。
 
 ### 3.3 底层接口（其他 Agent / 脚本也可直接调用）
 

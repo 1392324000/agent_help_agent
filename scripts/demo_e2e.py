@@ -18,6 +18,7 @@
 import os
 import sys
 import time
+import json
 
 # 演示 = mock 链：专家端订阅支付判定走 mock（模拟 USDT 转账），须在创建服务前设置
 os.environ.setdefault("AGENT_HUB_MOCK_CHAIN", "1")
@@ -26,7 +27,7 @@ os.environ.setdefault("AGENT_SUB_DURATION_SCALE", "300")
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from agent_sdk import HubClient, AgentServer, KeyPair, Wallet
+from agent_sdk import HubClient, AgentServer, KeyPair, Wallet, protocol
 
 HUB_URL = os.environ.get("AGENT_HUB_URL", "http://127.0.0.1:20100")
 BASE_PORT = 20111
@@ -84,6 +85,20 @@ def _handle_invoke(name, cap, p):
 
 def banner(t):
     print("\n" + "=" * 68 + f"\n  {t}\n" + "=" * 68)
+
+
+def clean_hub_db():
+    """--clean：清空 Hub 的 agents/orders/deals（仅 mock 测试环境；慎用于真实库）。"""
+    import sqlite3 as _sq
+    path = os.environ.get("AGENT_HUB_DB_PATH") or os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "hub", "hub.db")
+    conn = _sq.connect(path)
+    c = conn.cursor()
+    for t in ("deals", "orders", "agents"):
+        c.execute(f"DELETE FROM {t}")
+    conn.commit()
+    conn.close()
+    print(f"  🧹 已清空 Hub 测试数据（{path}）")
 
 
 # 客户购买参数：最小单位一刻钟（0.25h），标价是小时价
@@ -222,8 +237,41 @@ def main():
               f"source={market.get('market', {}).get('source')} "
               f"参考价 {market.get('market', {}).get('reference')} USDT/h")
 
+        # ---- ⑥ 安全验证：token 绑定客户钱包，第三方窃取/中间人篡改均被拒 ----
+        banner("⑥ 安全验证：token 绑定客户钱包地址（防复制冒用 + 防中间人篡改）")
+        attacker = HubClient(HUB_URL, Wallet.generate(), KeyPair())
+        r = attacker.invoke(picked["agent_id"], dict(token), "detect_lesion", {"image": "stolen.jpg"})
+        print(f"  🕵️ 攻击者({attacker.agent_id[:12]}…) 持窃取 token 调用 → "
+              + (f"❌ 未被拦截! {r.get('error')}" if r.get("ok") else f"✅ 已拦截: {r.get('error')}"))
+
+        # 中间人：截获客户合法请求，篡改 params 但不重签（签名与参数不匹配 → 拒）
+        import urllib.request as _ur
+        canon_ok = json.dumps({"image": "tampered.jpg"}, sort_keys=True, separators=(",", ":"))
+        sig_ok = cust.wallet.sign_text(f"invoke:{token['payload']['oid']}:detect_lesion:{canon_ok}")
+        body_ok = {"token": token, "capability": "detect_lesion",
+                   "params": {"image": "tampered.jpg"},
+                   "subscriber": cust.agent_id, "signature": sig_ok}
+        body_evil = dict(body_ok)
+        body_evil["params"] = {"image": "evil_injected.jpg"}  # 篡改，签名不动
+        req = _ur.Request(picked["endpoint"].rstrip("/") + protocol.AGENT_ENDPOINTS["invoke"],
+                          data=json.dumps(body_evil).encode(),
+                          headers={"Content-Type": "application/json"})
+        try:
+            with _ur.urlopen(req, timeout=10) as r3:
+                rr = json.loads(r3.read())
+            print(f"  🕵️ 中间人篡改参数(不重签) → ❌ 未被拦截! {rr.get('error')}")
+        except Exception as e:
+            import urllib.error as _ue
+            detail = ""
+            if isinstance(e, _ue.HTTPError):
+                try:
+                    detail = json.loads(e.read()).get("error", str(e))
+                except Exception:
+                    detail = str(e)
+            print(f"  🕵️ 中间人篡改参数(不重签) → ✅ 已拦截: {detail}")
+
         banner("🎉 演示完成：打分搜索 → 挑选 → 刻钟购买 → 过期前自动续购 → 一对一工作 → 成交")
-        print(f"  共续购 {renews} 次、完成 {min(len(images), i)} 次工作")
+        print(f"  共续购 {renews} 次、完成 {min(len(images), i)} 次工作；token 已绑定客户钱包（防冒用）")
         print("  Hub 记录可查: http://127.0.0.1:20100/ （仪表盘 agents/orders/deals）")
     finally:
         for client, server, prof in experts:
@@ -235,4 +283,6 @@ def main():
 
 
 if __name__ == "__main__":
+    if "--clean" in sys.argv:
+        clean_hub_db()
     main()

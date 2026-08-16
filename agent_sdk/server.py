@@ -25,7 +25,7 @@ from collections import defaultdict
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from .crypto import (KeyPair, Session, GroupSession, responder_session, b64d)
-from .wallet import Wallet, recover_address_from_signature
+from .wallet import Wallet, recover_address_from_signature, parse_recoverable_signature
 from . import protocol
 from .subscription import (SubscriptionStore, create_sub_token, verify_sub_token)
 from .security import (guard_outbound, collect_own_secrets, mark_inputs_auto,
@@ -526,7 +526,7 @@ class AgentServer:
                                             "order_id": order_id,
                                             "amount_usdt": order["amount_usdt"]})
 
-                # ---- 调用能力：验签 token（签名+时效，无状态验证） ----
+                # ---- 调用能力：验签 token（签名+时效）→ 校验调用者==token绑定的客户钱包 ----
                 if path == protocol.AGENT_ENDPOINTS["invoke"]:
                     payload = verify_sub_token(body.get("token") or {}, owner.wallet.address)
                     if not payload:
@@ -534,6 +534,24 @@ class AgentServer:
                                                 "error": "订阅 token 无效或已过期（需先 POST /subscribe 订阅）"})
                     capability = (body.get("capability") or "").strip()
                     params = body.get("params") or {}
+                    # 🔒 token 绑定客户钱包：调用者地址必须 == token.sub，且请求签名
+                    #    恢复地址 == token.sub（防 token 复制/转发被第三方冒用）
+                    subscriber = (body.get("subscriber") or "").strip().lower()
+                    if not re.fullmatch(r"0x[0-9a-f]{40}", subscriber):
+                        return self._send(400, {"ok": False,
+                                                "error": "subscriber 必须是 0x+40位hex 的钱包地址"})
+                    if subscriber != payload["sub"]:
+                        return self._send(403, {"ok": False,
+                                                "error": f"调用者 {subscriber[:12]}… 不是该 token 绑定的客户 "
+                                                         f"{payload['sub'][:12]}…（token 已绑定钱包地址）"})
+                    canon_params = json.dumps(params, sort_keys=True, separators=(",", ":"))
+                    message = f"invoke:{payload['oid']}:{capability}:{canon_params}"
+                    sig_hex, rec_id = parse_recoverable_signature(body.get("signature") or "")
+                    recovered = recover_address_from_signature(sig_hex, message.encode("utf-8"), rec_id)
+                    if not recovered or recovered.lower() != payload["sub"]:
+                        return self._send(403, {"ok": False,
+                                                "error": f"invoke 签名无效（恢复出 {recovered or '?'}，"
+                                                         f"不是 token 绑定的客户 {payload['sub'][:12]}…）"})
                     if not capability:
                         return self._send(400, {"ok": False, "error": "缺少 capability"})
                     if owner.caps and capability not in owner.caps:

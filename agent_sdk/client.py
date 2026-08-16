@@ -347,11 +347,24 @@ class HubClient:
 
     def invoke(self, peer_agent_id: str, token: dict, capability: str,
                params: dict | None = None) -> dict:
-        """带订阅 token 调用服务方能力（RPC 语义：需求=参数，产物=返回值）。"""
+        """带订阅 token 调用服务方能力（RPC 语义：需求=参数，产物=返回值）。
+
+        请求携带**调用者钱包地址 + 对请求的 ECDSA 签名**：服务端验签 token 后
+        恢复签名地址 == token.sub（绑定的客户钱包）才放行——token 无法被第三方
+        复制冒用（绑定客户钱包地址，防漏洞）。
+        """
+        params = params or {}
         peer = self.get_agent(peer_agent_id)
-        return _post(f"{peer['endpoint'].rstrip('/')}{protocol.AGENT_ENDPOINTS['invoke']}", {
-            "token": token, "capability": capability, "params": params or {},
-        })
+        body = {
+            "token": token, "capability": capability, "params": params,
+            "subscriber": self.agent_id,
+        }
+        # 签名消息：invoke:{token的order_id}:{capability}:{规范化params}
+        # （绑定具体订阅 + 防篡改 + 防跨订阅重放）
+        canon_params = json.dumps(params, sort_keys=True, separators=(",", ":"))
+        message = f"invoke:{token['payload']['oid']}:{capability}:{canon_params}"
+        body["signature"] = self.wallet.sign_text(message)
+        return _post(f"{peer['endpoint'].rstrip('/')}{protocol.AGENT_ENDPOINTS['invoke']}", body)
 
     def report_deal(self, order_id: str, buyer: str, amount_usdt: float,
                     duration_hours: float, tx_hash: str = "") -> dict:
