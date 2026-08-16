@@ -210,12 +210,13 @@ class HubClient:
     def search(self, domain: str | None = None, subdomain: str | None = None,
                skills: str | None = None, q: str | None = None,
                limit: int = 50) -> list[dict]:
+        from urllib.parse import quote
         resp = _get(f"{self.hub_url}{protocol.HUB_ENDPOINTS['agents']}"
                     f"?limit={limit}"
-                    + (f"&domain={domain}" if domain else "")
-                    + (f"&subdomain={subdomain}" if subdomain else "")
-                    + (f"&skills={skills}" if skills else "")
-                    + (f"&q={q}" if q else ""))
+                    + (f"&domain={quote(domain)}" if domain else "")
+                    + (f"&subdomain={quote(subdomain)}" if subdomain else "")
+                    + (f"&skills={quote(skills)}" if skills else "")
+                    + (f"&q={quote(q)}" if q else ""))
         if not resp.get("ok"):
             raise HubError(resp.get("error", "搜索失败"))
         return resp["agents"]
