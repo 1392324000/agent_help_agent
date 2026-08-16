@@ -387,6 +387,25 @@ class HubClient:
         })
 
     # ------------------------------------------------------------------
+    # 服务评价：客户对专家服务能力打分（hub 推荐/客户选择的依据之一）
+    # ------------------------------------------------------------------
+
+    def submit_rating(self, order_id: str, seller: str, scores: dict,
+                      comment: str = "") -> dict:
+        """服务完成后客户对专家打分（3-5 维，1-5 分）。
+
+        签名消息：rate:{order_id}:{seller}:{规范化scores}（buyer 钱包签名，防伪造），
+        Hub 校验订单已成交且买家/卖家匹配才接受——没消费不能乱打分。
+        """
+        canon = json.dumps(scores, sort_keys=True, separators=(",", ":"))
+        message = f"rate:{order_id}:{seller.lower()}:{canon}"
+        return _post(f"{self.hub_url}{HUB_API_PREFIX}/ratings", {
+            "order_id": order_id, "buyer": self.agent_id, "seller": seller.lower(),
+            "scores": scores, "comment": comment,
+            "signature": self.wallet.sign_text(message),
+        })
+
+    # ------------------------------------------------------------------
     # 发起加密单聊
     # ------------------------------------------------------------------
 

@@ -5,6 +5,13 @@
 
 ## 〇、最近更新（2026-08-16）
 
+- **⭐ 服务评价：客户对专家 5 维打分（hub 推荐/客户选择的依据之一）**：完成沟通后客户
+  对专家打分 quality/speed/expertise/value/reliability（1-5）。买家钱包签名提交
+  （rate:{order}:{seller}:{scores}），Hub 校验订单在 deals 成交且买家/卖家匹配（没消费
+  不能打分、一单一评）。搜索聚合展示 `评分x.x(N人评)`，推荐分 = 关键词相关分 + 评分加成
+  （RATING_BONUS_WEIGHT=0.5，相关性为主）。CLI `rate` 命令 + `submit_rating` API。
+  demo ⑧ 实测：评分 4.6 入库 → 搜索得分 71→73.3 → 非买家打分被拒
+
 - **🔗 会话保持 + 复购接续（让复购有价值）**：断开时专家提示**会话保持时间**
   （默认 5 分钟 AGENT_SUB_KEEP_MINUTES 可配，"请及时复购重连，复购可直接接续"）；
   保持窗口内复购 → 专家签发新 token 时返回 `resumed:true` + 上次工作上下文

@@ -385,7 +385,7 @@ def cmd_search(args):
 
 
 def cmd_find(args):
-    """aha 核心：遇问题→搜索打分→最多 20 个候选（得分+标价+能力签名），
+    """aha 核心：遇问题→搜索打分→最多 20 个候选（得分+标价+能力签名+评分），
     由本 agent 按需求自行判定最佳，再主动订阅连接。
     --connect 为快捷方式（自动选最高分）；--json 输出机器可解析结构。"""
     client, _, _ = _client()
@@ -402,8 +402,10 @@ def cmd_find(args):
     print(f"🔍 关键词打分匹配：{len(scored)} 个候选（最多 {limit}，得分高在前）\n")
     for i, a in enumerate(scored, 1):
         price = a.get("price")
+        rt = a.get("ratings") or {}
+        rt_s = (f"评分 {rt['avg']}（{rt['count']}人评）" if rt else "暂无评分")
         print(f"  #{i} 得分 {a['score']:.2f}  "
-              + (f"标价 {price} USDT/h" if price else "未标价"))
+              + (f"标价 {price} USDT/h  " if price else "未标价  ") + rt_s)
         print(f"     {a['agent_id']}  {a['domain']}/{a['subdomain']}")
         if a.get("description"):
             print(f"     简介: {a['description']}")
@@ -418,7 +420,7 @@ def cmd_find(args):
         if a.get("model"):
             print(f"     模型: {a['model']}")
         print()
-    print("→ 判定：结合 得分/标价/能力签名/描述 自行选定最合适专家，主动连接：")
+    print("→ 判定：结合 得分/标价/评分/能力签名/描述 自行选定最合适专家，主动连接：")
     print(f"     python3 agent_cli.py subscribe --peer 0x选中的专家agent_id --duration 0.25")
     print(f"     python3 agent_cli.py invoke --peer 0x选中的专家agent_id --capability 能力名 --params '{{\"...\": \"...\"}}'")
     if args.connect:
@@ -743,6 +745,40 @@ def cmd_invoke(args):
         sys.exit(1)
 
 
+def cmd_rate(args):
+    """服务完成后客户对专家打分（5 维：quality/speed/expertise/value/reliability，1-5）。
+    买家钱包签名提交，Hub 校验订单已成交且买家/卖家匹配；作为 hub 推荐/客户选择依据之一。"""
+    from agent_sdk.client import HubClient
+    client, _, _ = _client(args, args.wallet_key)
+    scores = {}
+    if args.scores:
+        try:
+            scores = json.loads(args.scores)
+        except json.JSONDecodeError:
+            print("❌ --scores 必须是 JSON 对象，如 '{\"quality\":5,\"speed\":4}'")
+            sys.exit(1)
+    else:
+        for dim, cn in (("quality", "服务质量"), ("speed", "响应速度"),
+                        ("expertise", "专业度"), ("value", "性价比"),
+                        ("reliability", "可靠性")):
+            while True:
+                try:
+                    v = int(input(f"  {cn}({dim}) 1-5: ").strip())
+                    if 1 <= v <= 5:
+                        scores[dim] = v
+                        break
+                    print("  ⚠️ 请输入 1-5")
+                except ValueError:
+                    print("  ⚠️ 请输入 1-5")
+    resp = client.submit_rating(args.order, args.peer.lower(), scores, args.comment or "")
+    print(json.dumps(resp, ensure_ascii=False, indent=2))
+    if resp.get("ok"):
+        print(f"✅ 已为 {args.peer[:14]}… 记录 5 维评分（订单 {args.order}）")
+    else:
+        print(f"❌ 评分失败: {resp.get('error')}")
+        sys.exit(1)
+
+
 # ---------------------------------------------------------------------------
 # 自主报价：定价 / 自动调价
 # ---------------------------------------------------------------------------
@@ -985,6 +1021,14 @@ def main():
     s.add_argument("--token-file", help="订阅 token 文件（默认 ~/.agent-marketplace/subscriptions/{peer}.json）")
     s.add_argument("--wallet-key")
     s.set_defaults(fn=cmd_invoke)
+
+    s = sub.add_parser("rate", help="⭐ 服务完成后客户对专家 5 维打分(quality/speed/expertise/value/reliability，1-5)，hub 推荐依据之一")
+    s.add_argument("--peer", required=True, help="被评专家 agent_id（服务方）")
+    s.add_argument("--order", required=True, help="成交订单号（deals 中的 order_id）")
+    s.add_argument("--scores", help="维度分 JSON，如 '{\"quality\":5,\"speed\":4,\"expertise\":5,\"value\":4,\"reliability\":5}'（缺省则交互输入）")
+    s.add_argument("--comment", default="", help="评语（可选）")
+    s.add_argument("--wallet-key")
+    s.set_defaults(fn=cmd_rate)
 
     s = sub.add_parser("balance", help="查看钱包余额（任意 EVM 链只读：原生币 + USDT）")
     s.add_argument("--chain", default=os.environ.get("AGENT_HUB_CHAIN", "bsc"),

@@ -293,6 +293,29 @@ def main():
         print(f"  ✅ 复购后调用 → " + (f"成功: {r8.get('result', {}).get('findings')}"
               if r8.get("ok") else f"失败: {r8.get('error')}"))
 
+        # ---- ⑧ 服务完成：客户对专家 5 维打分（hub 推荐/客户选择的依据之一）----
+        banner("⑧ 服务完成：客户对专家 5 维打分（quality/speed/expertise/value/reliability，1-5）")
+        seller_client.report_deal(sub["order_id"], cust_wallet.address,
+                                  sub["amount_usdt"], QUARTER_HOURS)  # 先汇报复购成交
+        scores = {"quality": 5, "speed": 4, "expertise": 5, "value": 4, "reliability": 5}
+        rr = cust.submit_rating(sub["order_id"], picked["agent_id"], scores,
+                                comment="检测准确，报告结构清晰")
+        print(f"  ⭐ 评分提交: " + (rr.get("message") if rr.get("ok") else rr.get("error")))
+        if rr.get("ratings"):
+            rt = rr["ratings"]
+            dims = "  ".join(f"{k}:{v}" for k, v in rt["dims"].items())
+            print(f"     专家评分聚合: 平均 {rt['avg']}（{rt['count']}人评）  {dims}")
+        # 搜索重新打分：评分加成进入推荐分
+        hits2 = [a for a in cust.search(q="X光 病灶检测", limit=20) if a.get("score", 0) > 0]
+        top2 = hits2[0]
+        rt2 = top2.get("ratings") or {}
+        print(f"  🔍 重新搜索: 影像专家得分 {top2['score']}（相关分+评分加成；"
+              f"评分 {rt2.get('avg')}，{rt2.get('count')}人评）")
+        # 防伪造：非买家（未消费客户）打分被拒
+        r_fake = attacker.submit_rating(sub["order_id"], picked["agent_id"], scores)
+        print(f"  🕵️ 非买家打分 → " + (f"❌ 未被拦截!" if r_fake.get("ok")
+              else f"✅ 已拦截: {r_fake.get('error')}"))
+
         banner("🎉 演示完成：打分搜索 → 挑选 → 刻钟购买 → 过期前自动续购 → 一对一工作 → 成交")
         print(f"  共续购 {renews} 次、完成 {min(len(images), i)} 次工作；token 绑定客户钱包；"
               f"到期未续购自动断开，重新订阅可恢复")
