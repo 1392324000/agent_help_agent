@@ -278,12 +278,19 @@ def main():
         time.sleep(wait)
         r7 = cust.invoke(picked["agent_id"], token, "detect_lesion", {"image": "late_work.jpg"})
         print(f"  📞 到期后调用 → " + (f"❌ 未被断开: {r7}" if r7.get("ok")
-              else f"✅ 专家返回: {r7.get('error')}（disconnected={r7.get('disconnected')}）"))
-        print(f"  🔌 重新订阅（换新 token）恢复连接……")
+              else f"✅ 专家返回: {r7.get('error')}（disconnected={r7.get('disconnected')}，"
+                   f"keep_seconds={r7.get('keep_seconds')}）"))
+        print(f"  🔌 复购重连（换新 token）——应直接接上之前的会话……")
         sub = buy_quarter()
         token = sub["token"]
+        if sub.get("resumed"):
+            ctx = (sub.get("workspace") or {}).get("context") or {}
+            print(f"  🔗 已接续之前的会话: 上次工作 capability={ctx.get('capability')}，"
+                  f"params={ctx.get('params')}")
+        else:
+            print("  ⚠️ 未接续到之前的会话（保持窗口已过）")
         r8 = cust.invoke(picked["agent_id"], token, "detect_lesion", {"image": "resumed_work.jpg"})
-        print(f"  ✅ 续购后调用 → " + (f"成功: {r8.get('result', {}).get('findings')}"
+        print(f"  ✅ 复购后调用 → " + (f"成功: {r8.get('result', {}).get('findings')}"
               if r8.get("ok") else f"失败: {r8.get('error')}"))
 
         banner("🎉 演示完成：打分搜索 → 挑选 → 刻钟购买 → 过期前自动续购 → 一对一工作 → 成交")

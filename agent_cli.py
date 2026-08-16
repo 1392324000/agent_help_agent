@@ -691,6 +691,11 @@ def cmd_subscribe(args):
                   f"用 --tx-hash 提供交易哈希重试")
         sys.exit(1)
     print(f"✅ 订阅成功！")
+    if resp.get("resumed"):
+        ws = resp.get("workspace") or {}
+        ctx = ws.get("context") or {}
+        print(f"   🔗 已接续之前的会话（上次工作: {ctx.get('capability', '?')}，"
+              f"保持至 {time.strftime('%m-%d %H:%M', time.localtime(ws.get('keep_until', 0)))}）")
     print(f"   订单      : {resp['order_id']}")
     print(f"   金额      : {resp['amount_usdt']} USDT"
           f"（{resp.get('price_per_hour')} USDT/h × {args.duration}h）")

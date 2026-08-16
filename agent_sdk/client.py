@@ -343,7 +343,10 @@ class HubClient:
         return {"ok": True, "token": token, "expires_at": conf["expires_at"],
                 "order_id": order_id, "amount_usdt": amount,
                 "price_per_hour": sub.get("price_per_hour"),
-                "chain": sub.get("chain")}
+                "chain": sub.get("chain"),
+                "resumed": conf.get("resumed", False),
+                "workspace": conf.get("workspace"),
+                "keep_seconds": conf.get("keep_seconds")}
 
     def invoke(self, peer_agent_id: str, token: dict, capability: str,
                params: dict | None = None) -> dict:

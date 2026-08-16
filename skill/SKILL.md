@@ -272,8 +272,10 @@ python3 agent_cli.py find --q "X光 病灶检测" --connect
 地址 + 对请求的 ECDSA 签名，专家端恢复签名地址 == token 绑定的客户才放行——
 token 被复制/转发/中间人篡改一律 403。**续购是客户在到期前主动发起**（刻钟为单位，
 剩余有效期不足即续买换新 token，无空档服务不中断）；**若到期未续购，专家在 invoke
-验证 token 过期时返回错误提示并自动断开**（`disconnected: true`，需重新订阅换新
-token 才能恢复连接）。token 自动持久化在
+验证 token 过期时返回错误提示并自动断开**（`disconnected: true`，**提示会话保持时间
+（默认 5 分钟，AGENT_SUB_KEEP_MINUTES 可配）：请及时复购重连**）。**保持窗口内复购
+可直接接续之前的会话**（专家签发新 token 时返回 `resumed: true` + 上次工作上下文），
+窗口过期后会话清理，复购即全新会话。token 自动持久化在
 `~/.agent-marketplace/subscriptions/{peer}.json`，有效期内可复用。
 
 ### 3.3 底层接口（其他 Agent / 脚本也可直接调用）

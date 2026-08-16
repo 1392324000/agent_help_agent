@@ -29,6 +29,8 @@ from .wallet import (Wallet, recover_address_from_signature,
 
 TOKEN_VERSION = 1
 DEFAULT_VALID_HOURS = 24  # 订单有效期（小时，未支付则过期）
+# 断开后会话保持窗口（分钟）：客户复购可接续之前的会话，过期则清理
+SUB_GRACE_MINUTES = int(__import__("os").environ.get("AGENT_SUB_KEEP_MINUTES", "5"))
 
 
 # ---------------------------------------------------------------------------
@@ -96,6 +98,7 @@ class SubscriptionStore:
     def __init__(self):
         self._orders: dict[str, dict] = {}
         self._disconnects: list[dict] = []   # 自动断开记录（token 过期未续购）
+        self._workspaces: dict[str, dict] = {}  # 客户工作上下文（断开后保持窗口内不清理，复购可接续）
         self._lock = __import__("threading").Lock()
 
     def create(self, subscriber: str, duration_hours: float,
@@ -160,13 +163,54 @@ class SubscriptionStore:
         """token 过期自动断开：客户到期未续购 → 专家端记录断开事件。
 
         断开后该客户旧 token 的一切调用都被拒（必须重新订阅换新 token）。
+        会话保持窗口内（AGENT_SUB_KEEP_MINUTES 分钟）复购可直接接续。
         """
-        ev = {"subscriber": subscriber.lower(), "order_id": order_id,
+        sub = subscriber.lower()
+        ev = {"subscriber": sub, "order_id": order_id,
               "expired_at": expired_at or 0, "disconnected_at": int(time.time())}
         with self._lock:
             self._disconnects.append(ev)
+            # 保持会话：断开时把 keep_until 拉长到 now + 保持窗口（从断开时刻起算）
+            ws = self._workspaces.get(sub)
+            if ws:
+                ws["keep_until"] = time.time() + SUB_GRACE_MINUTES * 60
         return ev
 
     def disconnect_count(self) -> int:
         with self._lock:
             return len(self._disconnects)
+
+    # ---- 会话保持：工作上下文 + 复购接续 ----
+
+    def touch_workspace(self, subscriber: str, order_id: str,
+                        context: dict | None = None) -> dict:
+        """invoke 成功后更新客户工作上下文（复购时接续，含上次工作记录）。
+
+        保持窗口：keep_until = now + AGENT_SUB_KEEP_MINUTES 分钟，窗口内复购可接续。
+        """
+        sub = subscriber.lower()
+        now = int(time.time())
+        with self._lock:
+            ws = self._workspaces.get(sub) or {}
+            ws.update({"subscriber": sub, "order_id": order_id,
+                       "updated_at": now,
+                       "keep_until": time.time() + SUB_GRACE_MINUTES * 60})
+            if context:
+                ws["context"] = context
+            self._workspaces[sub] = ws
+        return dict(self._workspaces[sub])
+
+    def get_workspace(self, subscriber: str) -> dict | None:
+        """返回未过期的客户会话（复购接续用）；已过期则清理（会话不再保留）。"""
+        sub = subscriber.lower()
+        with self._lock:
+            ws = self._workspaces.get(sub)
+            if not ws:
+                return None
+            if ws["keep_until"] < time.time():
+                self._workspaces.pop(sub, None)
+                return None
+            return dict(ws)
+
+    def grace_seconds(self) -> int:
+        return SUB_GRACE_MINUTES * 60

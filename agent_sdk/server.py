@@ -518,13 +518,25 @@ class AgentServer:
                     token = create_sub_token(owner.wallet, order["subscriber"],
                                              order["duration_hours"], order_id)
                     owner._subscriptions.mark_completed(order_id, token)
+                    # 复购接续：会话保持窗口内复购 → 直接接上之前的会话
+                    ws = owner._subscriptions.get_workspace(order["subscriber"])
+                    resumed = bool(ws) and ws.get("order_id") != order_id
+                    if resumed:
+                        print(f"[{owner.name}] 🔗 客户 {order['subscriber'][:12]}… 复购，"
+                              f"已接续之前的会话（保持至 "
+                              f"{time.strftime('%m-%d %H:%M', time.localtime(ws['keep_until']))}）")
                     print(f"[{owner.name}] 🔑 已签发订阅 token"
                           f"（{order['subscriber'][:12]}…，{order['duration_hours']}h，至 "
                           f"{time.strftime('%m-%d %H:%M', time.localtime(token['payload']['exp']))}）")
-                    return self._send(200, {"ok": True, "token": token,
-                                            "expires_at": token["payload"]["exp"],
-                                            "order_id": order_id,
-                                            "amount_usdt": order["amount_usdt"]})
+                    resp = {"ok": True, "token": token,
+                            "expires_at": token["payload"]["exp"],
+                            "order_id": order_id,
+                            "amount_usdt": order["amount_usdt"],
+                            "keep_seconds": owner._subscriptions.grace_seconds()}
+                    if resumed:
+                        resp["resumed"] = True
+                        resp["workspace"] = ws  # 未过期的会话（含上次工作上下文）
+                    return self._send(200, resp)
 
                 # ---- 调用能力：验签 token → 校验调用者==token绑定的客户钱包 ----
                 #     token 过期 → 返回过期错误提示并自动断开（需重新订阅续购）
@@ -536,12 +548,16 @@ class AgentServer:
                         # 🔌 到期未续购换 token：专家端验证过期 → 提示 + 自动断开
                         sub = str(tp.get("sub") or "").lower()
                         ev = owner._subscriptions.disconnect(sub, str(tp.get("oid") or ""), int(exp))
+                        keep = owner._subscriptions.grace_seconds() // 60
                         print(f"[{owner.name}] 🔌 连接已自动断开：客户 {sub[:12]}… 订阅"
-                              f"于 {time.strftime('%m-%d %H:%M', time.localtime(int(exp)))} 过期未续购")
+                              f"于 {time.strftime('%m-%d %H:%M', time.localtime(int(exp)))} 过期未续购"
+                              f"（会话保持 {keep} 分钟，复购可直接接续）")
                         return self._send(403, {"ok": False,
                                                 "error": f"订阅已过期（{time.strftime('%m-%d %H:%M:%S', time.localtime(int(exp)))}），"
-                                                         f"连接已自动断开；请重新订阅续购（最小一刻钟）",
-                                                "disconnected": True, "expired_at": int(exp)})
+                                                         f"连接已自动断开；会话将保持 {keep} 分钟，"
+                                                         f"请及时复购重连（复购可直接接续之前的会话，最小一刻钟）",
+                                                "disconnected": True, "expired_at": int(exp),
+                                                "keep_seconds": owner._subscriptions.grace_seconds()})
                     payload = verify_sub_token(tok, owner.wallet.address)
                     if not payload:
                         return self._send(403, {"ok": False,
@@ -590,6 +606,17 @@ class AgentServer:
                               f"（{guard.reason}）")
                         return self._send(406, {"ok": False, "error": f"安全边界：{guard.reason}",
                                                 "guard": [t for t, _ in guard.hits]})
+                    # 📝 记录工作上下文（复购接续：断开后保持窗口内复购可直接接上）
+                    try:
+                        import json as _json
+                        owner._subscriptions.touch_workspace(
+                            payload["sub"], payload["oid"], {
+                                "capability": capability,
+                                "params": params,
+                                "result": _json.dumps(guard.payload, ensure_ascii=False)[:2000],
+                            })
+                    except Exception:
+                        pass
                     return self._send(200, {"ok": True, "result": guard.payload,
                                             "subscriber": payload["sub"],
                                             "expires_at": payload["exp"],

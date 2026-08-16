@@ -5,6 +5,13 @@
 
 ## 〇、最近更新（2026-08-16）
 
+- **🔗 会话保持 + 复购接续（让复购有价值）**：断开时专家提示**会话保持时间**
+  （默认 5 分钟 AGENT_SUB_KEEP_MINUTES 可配，"请及时复购重连，复购可直接接续"）；
+  保持窗口内复购 → 专家签发新 token 时返回 `resumed:true` + 上次工作上下文
+  （capability/params/result 摘要，服务端 SubscriptionStore.touch_workspace 记录），
+  客户直接接上之前的会话；窗口过期会话自动清理（懒清理，float 秒精确边界）。
+  demo ⑦ 实测：断开提示含保持时间 → 复购 resumed → 上次工作记录 → 调用成功
+
 - **🔌 到期未续购 → 自动断开（完整订阅生命周期）**：invoke 验证 token 过期时**区分**
   过期/无效——过期：专家日志「连接已自动断开」+ 403 明确提示（过期时间/disconnected:true，
   请重新订阅续购）；无效（签名失败）：提示重新订阅。SubscriptionStore 新增 disconnect 断开
