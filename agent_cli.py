@@ -33,16 +33,8 @@ import time
 # 自动发现 agent_sdk：优先本包（agent_cli.py 与 agent_sdk/ 同级，SDK 随 Hub 分发解压即用），
 # 其次兼容旧版 skill 内置 vendor
 _HERE = os.path.dirname(os.path.abspath(__file__))
-for _cand in (
-    _HERE,                                          # SDK 包内（标准布局）
-    os.path.join(_HERE, "..", "vendor"),           # 旧 skill 内置（向后兼容）
-    os.path.join(_HERE, "..", "..", "..", ".."),  # 项目根
-    os.path.join(_HERE, "..", "..", ".."),        # 其他布局
-):
-    _p = os.path.abspath(_cand)
-    if os.path.isdir(os.path.join(_p, "agent_sdk")):
-        sys.path.insert(0, _p)
-        break
+if os.path.isdir(os.path.join(_HERE, "agent_sdk")):
+    sys.path.insert(0, _HERE)
 
 from agent_sdk import HubClient, AgentServer, KeyPair, Wallet
 
@@ -70,7 +62,7 @@ def _client(args=None, wallet_key: str | None = None) -> tuple[HubClient, Wallet
                 config = json.load(open(config_path))
             except Exception:
                 config = {}
-        if config.get("wallet_enc") or config.get("wallet_key"):
+        if config.get("wallet_enc"):
             wallet, keys = _load_identity(config, args)
         else:
             wallet, keys, _ = _create_identity(args, config_path)
@@ -146,11 +138,7 @@ def _load_identity(config: dict, args) -> tuple[Wallet, KeyPair]:
             except Exception:
                 print("⚠ keys_enc 解密失败，X25519 密钥将重新生成（公钥变化会影响已有加密会话）")
         return wallet, keys
-    wk = config.get("wallet_key", "")
-    if wk:
-        keys = KeyPair.from_private_b64(config.get("keys_private", "")) if config.get("keys_private") else KeyPair()
-        return Wallet.from_private_hex(wk), keys
-    print("❌ 未找到钱包身份（agent.json 无 wallet_enc/wallet_key），请先 init")
+    print("❌ 未找到钱包身份（agent.json 无 wallet_enc），请先 init")
     sys.exit(1)
 
 
@@ -304,10 +292,10 @@ def cmd_init(args):
             config = {}
 
     # ---- 已存在身份：幂等加载（自动解密验证） ----
-    if config.get("wallet_enc") or config.get("wallet_key"):
+    if config.get("wallet_enc"):
         wallet, _ = _load_identity(config, args)
         print(f"✅ 身份已存在（幂等，不重新生成）: {wallet.address}")
-        print(f"   配置: {config_path}（{'服务密钥加密存储' if config.get('wallet_enc') else '旧版明文存储，建议重新 init 迁移' }）")
+        print(f"   配置: {config_path}（服务密钥加密存储）")
         return
 
     # ---- 新身份：助记词派生 + 加密落盘 ----
@@ -435,7 +423,7 @@ def cmd_serve(args):
         print(f"🔒 使用远程签名服务 {args.signer_url}（本进程不持有私钥）")
     elif args.wallet_key:
         wallet = Wallet.from_private_hex(args.wallet_key)
-    elif config.get("wallet_enc") or config.get("wallet_key"):
+    elif config.get("wallet_enc"):
         wallet, keys = _load_identity(config, args)
         print(f"🔑 钱包身份已解密恢复: {wallet.address[:14]}…（服务密钥自动解密）")
     else:

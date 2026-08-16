@@ -336,7 +336,3 @@ def transfer_erc20(wallet: Wallet, to: str, cfg: ChainConfig | None = None,
                           gas_price=gas_price, tx_type=tx_type)
     return broadcast(cfg, raw)
 
-
-# 向后兼容别名（BSC 语境）
-transfer_bnb = transfer_native
-transfer_usdt = transfer_erc20

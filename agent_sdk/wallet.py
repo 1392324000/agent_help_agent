@@ -215,22 +215,19 @@ class Wallet:
 # ---------------------------------------------------------------------------
 
 def parse_signature(signature_hex: str) -> tuple[int, int, int]:
-    """解析签名 -> (r, s, v)。支持：
-      1. 0x + 65 字节 r||s||v（标准以太坊格式，v=27/28 时自动归一为 0/1）
-      2. 0x + DER 编码（旧格式兜底）
-    """
+    """解析签名 -> (r, s, v)。标准格式：0x + 65 字节 r||s||v，
+    v=27/28（以太坊旧式）归一为 0/1，v>=35（EIP-155）取奇偶。"""
     raw = bytes.fromhex(signature_hex.removeprefix("0x"))
-    if len(raw) == 65:
-        r = int.from_bytes(raw[:32], "big")
-        s = int.from_bytes(raw[32:64], "big")
-        v = raw[64]
-        if v >= 27:          # 以太坊旧式 v
-            v -= 27
-        elif v >= 35:        # EIP-155 v
-            v = (v - 35) % 2
-        return r, s, v
-    r, s = utils.decode_dss_signature(raw)
-    return r, s, -1
+    if len(raw) != 65:
+        raise ValueError("签名必须是 65 字节 r||s||v")
+    r = int.from_bytes(raw[:32], "big")
+    s = int.from_bytes(raw[32:64], "big")
+    v = raw[64]
+    if v >= 27:
+        v -= 27
+    elif v >= 35:
+        v = (v - 35) % 2
+    return r, s, v
 
 
 def recover_address_from_signature(signature_hex: str, message: bytes,
@@ -307,12 +304,6 @@ _G = (
     0x79BE667EF9DCBBAC55A06295CE870B07029BFCDB2DCE28D959F2815B16F81798,
     0x483ADA7726A3C4655DA4FBFC0E1108A8FD17B448A68554199C47D08FFB10D4B8,
 )
-
-
-def _sha256(data: bytes) -> bytes:
-    h = hashes.Hash(hashes.SHA256())
-    h.update(data)
-    return h.finalize()
 
 
 def _sqrt_y(x: int) -> int:
