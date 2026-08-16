@@ -125,12 +125,21 @@ class HubClient:
         return _post(f"{self.hub_url}{protocol.HUB_ENDPOINTS['order_payment'].format(order_id=order_id)}",
                      {"tx_hash": tx_hash})
 
-    def confirm_order(self, order_id: str) -> dict:
+    def confirm_order(self, order_id: str, retry: int = 8, interval: float = 5.0) -> dict:
         """Step 3：Hub 链上确认支付结果，订单 paid -> completed，生成注册。
-        注册成功时响应含 agent_token（保活/续费/刷新凭证)，自动保存。"""
-        resp = _post(f"{self.hub_url}{protocol.HUB_ENDPOINTS['order_confirm'].format(order_id=order_id)}", {})
-        if resp.get("ok") and resp.get("agent_token"):
-            self.agent_token = resp["agent_token"]
+        注册成功时响应含 agent_token（保活/续费/刷新凭证)，自动保存。
+        链上确认中（回执未生成/确认数不足，retryable）自动等待重试，最多 retry 次。"""
+        import time as _t
+        for i in range(retry):
+            resp = _post(f"{self.hub_url}{protocol.HUB_ENDPOINTS['order_confirm'].format(order_id=order_id)}", {})
+            if resp.get("ok") and resp.get("agent_token"):
+                self.agent_token = resp["agent_token"]
+                return resp
+            if resp.get("retryable"):
+                if i < retry - 1:
+                    _t.sleep(interval)
+                    continue
+            return resp
         return resp
 
     def order_status(self, order_id: str) -> dict:
@@ -159,10 +168,18 @@ class HubClient:
         if not app.get("ok"):
             return app
         order_id = app["order_id"]
-        tx = tx_hash or ("0x" + secrets.token_hex(32))  # 演示默认随机哈希；真实环境请填真实 tx_hash
         if app.get("chain_mode") == "mock":
-            self.mock_transfer(tx, amount_wei=amount_wei)
-        pay = self.submit_payment(order_id, tx)
+            tx_hash = tx_hash or ("0x" + secrets.token_hex(32))
+            self.mock_transfer(tx_hash, amount_wei=amount_wei)
+        else:
+            # 真实链：无 tx_hash 时钱包自动广播注册费（0.0001 BNB 等）
+            if not tx_hash:
+                from .chain import load_chain, transfer_native
+                cfg = load_chain("bsc")
+                amount_bnb = (amount_wei or app.get("amount_wei", 0)) / 1e18
+                tx_hash = transfer_native(self.wallet, app["platform_wallet"], cfg,
+                                          amount=amount_bnb)
+        pay = self.submit_payment(order_id, tx_hash)
         if not pay.get("ok"):
             return pay
         return self.confirm_order(order_id)
@@ -308,7 +325,7 @@ class HubClient:
         order_id = sub["order_id"]
         amount = sub["amount_usdt"]
 
-        # ② 支付：mock 模式模拟转账；真实模式需要调用方自行转账后提供 tx_hash
+        # ② 支付：mock 模式模拟转账；真实模式钱包自动广播 USDT（无 tx_hash 时）
         if not tx_hash:
             if sub.get("chain") == "mock":
                 m = _post(f"{endpoint}/subscribe/mock", {"order_id": order_id})
@@ -316,14 +333,22 @@ class HubClient:
                     return m
                 tx_hash = m["tx_hash"]
             else:
-                return {"ok": False, "error": "真实链模式：请先向服务方转账 USDT 后提供 --tx-hash",
-                        "order_id": order_id, "amount_usdt": amount,
-                        "receiver": sub.get("receiver")}
+                # 真实链：用本钱包自动向服务方转账 USDT（BEP-20）
+                from .chain import load_chain, transfer_erc20
+                cfg = load_chain("bsc")
+                tx_hash = transfer_erc20(self.wallet, sub["receiver"], cfg,
+                                         amount=sub["amount_usdt"])
 
-        # ③ 提交支付结果
-        pay = _post(f"{endpoint}{protocol.AGENT_ENDPOINTS['subscribe_payment']}", {
-            "order_id": order_id, "tx_hash": tx_hash,
-        })
+        # ③ 提交支付结果（链上确认中 retryable → 自动等待重试，最多 8 次）
+        import time as _t
+        pay = None
+        for _i in range(8):
+            pay = _post(f"{endpoint}{protocol.AGENT_ENDPOINTS['subscribe_payment']}", {
+                "order_id": order_id, "tx_hash": tx_hash,
+            })
+            if pay.get("ok") or not pay.get("retryable"):
+                break
+            _t.sleep(5)
         if not pay.get("ok"):
             return pay
 

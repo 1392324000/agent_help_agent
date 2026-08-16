@@ -5,6 +5,14 @@
 
 ## 〇、最近更新（2026-08-16）
 
+- **🔴 生产链路全自动验证通过（全角色小强钱包 0x97ab…，真实链 4/4）**：服务方/客户方
+  都用小强钱包——注册费 0.0001 BNB 与订阅费 0.5 USDT 自动广播且转回自己，链上真实交易、
+  资金零损失（USDT 变化 0、BNB 仅 gas）。修复 3 个生产 bug：① chain_verify 回执 null 崩溃
+  （交易未打包时 eth_getTransactionReceipt result=null → None.get 崩溃，hub+SDK 双修）；
+  ② 注册 confirm 暂时性未确认直接 failed → 改 retryable 保持 paid + 客户端自动重试；
+  ③ 订阅 payment 同样 retryable + 自动重试。SDK 现在 register_flow/subscribe_to_peer
+  真实链下**全自动**（自动广播注册费/USDT，无需手工 tx_hash）
+
 - **🧹 清除测试脚本和数据**：删除 scripts/demo_ab.py、demo_ab_init.sh、demo_e2e.py、
   test_deploy.sh、test_payments.py、test_realchain.py、examples/demo_full.py；清空
   Hub 测试数据（agents/orders/deals/ratings）；删除 /tmp 测试钱包与临时文件；

@@ -116,7 +116,10 @@ class ChainVerifier:
             receipt = self._rpc("eth_getTransactionReceipt", [tx_hash])
         except Exception as e:
             return False, f"查询回执失败：{e}"
-        status = receipt.get("result", {}).get("status")
+        res = receipt.get("result") or {}
+        status = res.get("status")
+        if status is None:
+            return False, "交易回执未生成（尚未确认打包，请稍后重试）"
         if status not in ("0x1", "0x01"):
             return False, "交易未成功（status != 0x1）"
         try:

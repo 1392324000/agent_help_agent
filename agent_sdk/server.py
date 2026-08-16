@@ -500,7 +500,13 @@ class AgentServer:
                         return self._send(400, {"ok": False, "error": "tx_hash must be 0x+64-hex"})
                     ok, msg = owner._verify_usdt(tx_hash, order["subscriber"], order["amount_usdt"])
                     if not ok:
-                        return self._send(400, {"ok": False, "error": f"USDT verification failed: {msg}"})
+                        # 暂时性失败（链上未找到/回执未生成/确认数不足）：保持 pending，客户端稍后重试
+                        retryable = any(k in msg for k in ("链上未找到交易", "回执未生成", "确认数不足"))
+                        return self._send(400, {"ok": False,
+                                                "error": f"USDT verification pending: {msg}" if retryable
+                                                         else f"USDT verification failed: {msg}",
+                                                "retryable": retryable,
+                                                "hint": "链上确认中，稍后自动重试" if retryable else "请检查转账"})
                     owner._subscriptions.mark_paid(order_id, tx_hash)
                     print(f"[{owner.name}] 💰 订单 {order_id} 已支付"
                           f"（{order['amount_usdt']} USDT，{msg})")
