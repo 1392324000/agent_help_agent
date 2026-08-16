@@ -452,6 +452,13 @@ def cmd_serve(args):
                                  price_usdt_per_hour=args.price)
             if args.demo_invoke:
                 # 演示能力：ping / echo（方便测试订阅-调用链路）
+                server.caps = {
+                    "ping": {"desc": "连通性探测（免费能力，任意参数）",
+                             "params": {}, "returns": {"pong": "bool", "at": "int", "server": "str"}},
+                    "echo": {"desc": "原样回显文本（测试入站打标与出站防护）",
+                             "params": {"text": "str, 要回显的内容"},
+                             "returns": {"echo": "str", "subscriber": "str"}},
+                }
                 def _demo_invoke(sub, cap, p):
                     if cap == "ping":
                         return {"pong": True, "at": int(time.time()), "server": args.name}
@@ -607,6 +614,13 @@ def cmd_subscribe(args):
     caps = manifest.get("capabilities", {})
     print(f"📄 服务方 {peer[:14]}…  报价: {manifest.get('price_usdt_per_hour', '?')} USDT/小时")
     print(f"   领域: {caps.get('domain')}/{caps.get('subdomain')}  技能: {', '.join(caps.get('skills', []))}")
+    cap_sigs = caps.get("caps") or {}
+    if cap_sigs:
+        print(f"   能力（黑盒契约，输入→产出）:")
+        for cname, csig in cap_sigs.items():
+            pstr = ", ".join(f"{k}={v}" for k, v in (csig.get("params") or {}).items()) or "无参数"
+            rstr = ", ".join(f"{k}:{v}" for k, v in (csig.get("returns") or {}).items()) or "—"
+            print(f"     · {cname}: 输入[{pstr}] → 产出[{rstr}]   {csig.get('desc','')}")
     print(f"\n① 申请订阅 {args.duration}h……")
     resp = client.subscribe_to_peer(peer, args.duration, tx_hash=args.tx_hash)
     if not resp.get("ok"):

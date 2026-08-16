@@ -119,6 +119,7 @@ class AgentServer:
         self.on_group_message = None    # fn(sender_id, group, payload)
         self.on_channel_request = None  # fn(sender_id, session_id, purpose) -> bool 是否接受
         self.on_invoke = None           # fn(subscriber_id, capability, params) -> dict|None（订阅调用）
+        self.caps: dict[str, dict] = {} # 能力签名（黑盒契约）：{cap: {"desc","params","returns"}}
 
     # ------------------------------------------------------------------
     # 安全：已注册校验（AGENT_REQUIRE_REGISTERED=1 时，仅接受平台注册过的 Agent 握手）
@@ -342,6 +343,7 @@ class AgentServer:
                             "domain": owner.domain,
                             "subdomain": owner.subdomain,
                             "skills": owner.skills,
+                            "caps": owner.caps,   # 能力签名：{能力名: {desc, params, returns}}（黑盒契约）
                         },
                         "price_usdt_per_hour": owner.price_usdt_per_hour,  # 自主报价（USDT/小时）
                         "protocol": "agent-marketplace/v1",
@@ -534,6 +536,10 @@ class AgentServer:
                     params = body.get("params") or {}
                     if not capability:
                         return self._send(400, {"ok": False, "error": "缺少 capability"})
+                    if owner.caps and capability not in owner.caps:
+                        return self._send(404, {"ok": False,
+                            "error": f"未知能力 {capability}（可用: {', '.join(owner.caps)}）",
+                            "caps": list(owner.caps)})
                     if not owner.on_invoke:
                         return self._send(501, {"ok": False, "error": "服务方未实现 on_invoke 回调"})
                     # 🔒 入站自动打标：外部参数自动包 [UNTRUSTED_INPUT]（防注入诱导）
