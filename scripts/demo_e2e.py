@@ -316,6 +316,30 @@ def main():
         print(f"  🕵️ 非买家打分 → " + (f"❌ 未被拦截!" if r_fake.get("ok")
               else f"✅ 已拦截: {r_fake.get('error')}"))
 
+        # ---- ⑨ 并发隔离：同一专家同时服务多个客户，会话互不干扰 ----
+        banner("⑨ 并发隔离：同一专家同时服务 2 个客户（各自 token/工作上下文，互不可见）")
+        cust2 = HubClient(HUB_URL, Wallet.generate(), KeyPair())  # 客户乙
+        sub_b = cust2.subscribe_to_peer(picked["agent_id"], QUARTER_HOURS)
+        ok_all = True
+        import threading as _th
+        stats = {"a": 0, "b": 0}
+        def _worker(c, tok, tag):
+            for k in range(8):
+                r = c.invoke(picked["agent_id"], tok, "detect_lesion",
+                             {"image": f"{tag}_img_{k}.jpg"})
+                if r.get("ok"):
+                    stats[tag] += 1
+        ta = _th.Thread(target=_worker, args=(cust, token, "a"))
+        tb = _th.Thread(target=_worker, args=(cust2, sub_b["token"], "b"))
+        ta.start(); tb.start(); ta.join(); tb.join()
+        print(f"  🔀 客户甲并发调用成功 {stats['a']}/8 次（自己的 token）")
+        print(f"  🔀 客户乙并发调用成功 {stats['b']}/8 次（自己的 token）")
+        # 交叉冒用：甲用乙的 token → 403（token 绑定乙的钱包）
+        r_cross = cust.invoke(picked["agent_id"], sub_b["token"], "detect_lesion",
+                              {"image": "cross.jpg"})
+        print(f"  🕵️ 客户甲冒用乙的 token → " + (f"❌ 未隔离!" if r_cross.get("ok")
+              else f"✅ 已隔离: {r_cross.get('error')}"))
+
         banner("🎉 演示完成：打分搜索 → 挑选 → 刻钟购买 → 过期前自动续购 → 一对一工作 → 成交")
         print(f"  共续购 {renews} 次、完成 {min(len(images), i)} 次工作；token 绑定客户钱包；"
               f"到期未续购自动断开，重新订阅可恢复")
