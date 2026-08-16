@@ -633,14 +633,26 @@ def cmd_serve(args):
             print(f"\n⚠ 钱包余额不足，注册前需先充值：")
             print(f"   充值地址: {fund_addr}")
             print(f"   所需金额: {amount} BNB（注册费）+ gas 0.000002 BNB")
-            print(f"   每 30 秒自动检查余额，到账后自动继续注册……（Ctrl+C 停止）")
+            print(f"   每 30 秒自动检查余额，到账后自动继续注册……（Ctrl+C 中止）")
             from agent_sdk.chain import load_chain, get_balances
             _cfg = load_chain("bsc")
             _need = amount + 0.000002
+            _waited = 0
             while True:
                 _bal = get_balances(_cfg, wallet.address)
                 if _bal["native"] >= _need:
                     break
+                # 部分到账但不足 → 明确差额
+                if 0 < _bal["native"] < _need:
+                    print(f"  ⚠ 已到账 {_bal['native']:.6f} BNB，还差 {_need - _bal['native']:.6f} BNB")
+                _waited += 30
+                if _waited >= 300 and _waited % 300 == 0:
+                    print("  ⚠ 已等待 5 分钟仍未到账，请检查：")
+                    print("     ① 充值网络是否选择 BSC（Chain ID 56）")
+                    print("     ② 金额是否 ≥ 所需 BNB（含 gas）")
+                    print("     ③ 链上交易是否已确认（bscscan.com 查询）")
+                    print(f"     ④ 收款地址是否正确: {fund_addr}")
+                    print("     （Ctrl+C 可中止；到账后自动继续注册，无需重启）")
                 time.sleep(30)
             print(f"✅ 余额已到账（{_bal['native']:.6f} BNB），继续注册……")
             resp = client.register_flow(endpoint=endpoint, domain=domain, subdomain=subdomain,
