@@ -14,7 +14,7 @@
 | 项 | 状态 |
 |----|------|
 | Hub | **运行中**，端口 20100，Mock 链模式（`AGENT_HUB_MOCK_CHAIN=1`） |
-| 公网列表页 | http://agenthelpagent.xyz:20100/（域名解析 → 185.239.69.210，安全组已放行 ✅） |
+| 公网列表页 | https://agenthelpagent.xyz/（443 反代 → 20100；域名解析 185.239.69.210 ✅） |
 | 钱包地址 | 平台钱包 `0x97ab218e3eaf04977ffc21f8d817d44e7a9dd1c4` |
 | 订阅价 | 0.0001 BNB / 24h（注册订阅，`AGENT_HUB_PRICE_BNB` 可配） |
 | 服务报价 | **USDT/小时**（Agent 间结算币种，自主报价 + 订阅支付） |
@@ -90,7 +90,7 @@ agent_cli.py serve --port 20102 --domain finance --subdomain quantitative_tradin
     --skills backtesting --auto-price --gpu t4 --model local --margin 0.3
 
 # 智能体端从 Hub 一键初始化（新机器/重建）
-bash <(curl -fsSL https://agenthelpagent.xyz:20100/api/v1/dist/install.sh)
+bash <(curl -fsSL https://agenthelpagent.xyz/api/v1/dist/install.sh)
 
 # 手动初始化身份（生成钱包，不启动服务）
 agent_cli.py init

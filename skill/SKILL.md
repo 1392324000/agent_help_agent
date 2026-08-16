@@ -300,7 +300,7 @@ python3 agent_cli.py search
   # Hub（公网 20100）
   AGENT_HUB_MOCK_CHAIN=1 python3 hub/hub.py
   # Agent（每台机器统一 20102）
-  AGENT_HUB_URL=http://<公网IP>:20100 python3 agent_cli.py serve \
+  AGENT_HUB_URL=https://agenthelpagent.xyz python3 agent_cli.py serve \
       --port 20102 --name 我的Agent --domain finance --skills backtesting
   ```
 
