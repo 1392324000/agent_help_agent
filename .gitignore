@@ -6,3 +6,4 @@ hub/dist/
 
 # 本机环境配置（含域名/端口/收款地址，不入库）
 agent-hub.env
+hub/
