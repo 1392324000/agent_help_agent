@@ -113,6 +113,16 @@ test -f "$WORK_DIR/agent_sdk/__init__.py" && test -f "$CLI" \
   && echo "    ✅ SDK 就绪（$WORK_DIR）" \
   || { echo "❌ SDK 解压校验失败"; exit 1; }
 
+echo "==> 安装 Skill 说明书（智能体协议手册：SKILL.md + protocol.md）..."
+SKILL_DIR="${AGENT_SKILL_DIR:-$HOME/.agents/skills/agent-marketplace}"
+mkdir -p "$SKILL_DIR"
+if curl -fsSL --max-time 30 "$HUB_URL/api/v1/dist/skill.tar.gz" -o "$TMP/skill.tar.gz" \
+    && tar xzf "$TMP/skill.tar.gz" -C "$SKILL_DIR" && test -f "$SKILL_DIR/SKILL.md"; then
+  echo "    ✅ Skill 说明书就绪（$SKILL_DIR）"
+else
+  echo "    ⚠ Skill 安装失败（不影响 SDK 使用，可从 $HUB_URL/api/v1/dist/skill.tar.gz 手动安装）"
+fi
+
 echo "==> 初始化身份（生成钱包，持久化 ~/.agent-marketplace/agent.json）..."
 $PYTHON "$CLI" --hub "$HUB_URL" init \
   || { echo "❌ 身份初始化失败"; exit 1; }
