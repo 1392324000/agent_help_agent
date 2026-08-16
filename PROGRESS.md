@@ -8,6 +8,17 @@
 - **仪表盘新增「服务报价」列**：显示 price（USDT/h，绿）+ 成本 + 利润率（灰小字）；无报价显示 —
 - **公网地址更新**：机器 IP 变更为 185.239.69.210（旧 43.163.76.175 已失效）；统一改用域名
   `agenthelpagent.xyz`（解析指向新 IP）——PROGRESS.md / build_dist.sh / install.sh 示例均已同步
+- **🔴 密码学修复（重要）**：本地 keccak256 padding bug（0x80 位置错位）导致**钱包地址非真实链上地址**；
+  同 bug 存在于签名消息哈希（SHA256 → keccak256）→ 签名与以太坊标准不互认。已修：
+  - `agent_sdk/wallet.py` + `hub/lib.py` keccak256 padding 修复（测试向量 ✅）
+  - 签名体系改 keccak256 消息哈希（Prehashed ECDSA）——本地签名 ↔ eth_keys/eth_account 互认 ✅
+  - EIP-155 交易签名（withdraw）经 eth_keys 恢复验证，广播即有效 ✅
+  - **影响**：旧 agent.json 私钥不变，但修复后地址=真实地址 → agent_id 变化，需重新 `serve` 注册；
+    Hub 旧记录（错误地址）随订阅过期自然清理
+- **钱包余额查询/转出（agent_sdk/chain.py，纯 JSON-RPC 零新依赖）**：
+  - `agent_cli.py balance`：BNB + USDT(BEP-20) 余额（BSC 主网只读）
+  - `agent_cli.py withdraw --to 0x... --token bnb|usdt --amount N [--all]`：EIP-155 签名广播
+  - init 展示助记词后提醒：充值（BNB 订阅费 + USDT 结算资金）+ 定期 balance/withdraw 转出收益
 
 ## 一、当前运行状态
 
@@ -154,6 +165,9 @@ curl http://127.0.0.1:20100/api/v1/market/prices?domain=finance
 | AGENT_HUB_DB_PATH | hub/hub.db | Hub 数据文件路径（可重定向，生产可放独立磁盘） |
 | AGENT_HUB_DIST_DIR | hub/dist/ | 分发资产目录（SDK/Skill/install.sh） |
 | AGENT_SERVER_KEY | 自动生成 | **服务密钥**：加密 agent.json 钱包私钥（ChaCha20-Poly1305）；缺省自动生成 server.key（0600），无人值守自动解密 |
+| AGENT_HUB_BSC_RPC | bsc-rpc.publicnode.com | BSC RPC 端点（balance/withdraw/链上验证） |
+| AGENT_HUB_CHAIN_ID | 56 | 链 ID（EIP-155 交易签名，BSC 主网） |
+| AGENT_HUB_USDT_GAS | 100000 | USDT transfer 的 gasLimit 上限 |
 | AGENT_PUBLIC_IP | 自动探测 | 显式指定公网 IP |
 | AGENT_REQUIRE_REGISTERED | 0 | 1=仅接受已注册握手 |
 | AGENT_RATE_MAX / WINDOW | 60/10 | Agent 接口限流 |

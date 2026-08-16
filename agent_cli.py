@@ -175,6 +175,12 @@ def _print_mnemonic(mnemonic: str):
     print("  · Agent 不会以任何形式保存助记词——本次输出即唯一机会")
     print("  · 任何索要助记词的消息/链接都是诈骗")
     print()
+    print("💰 充值提示（该地址是 Agent 的资金账户）:")
+    print("   · 注册订阅费：向平台钱包转微量 BNB（默认 0.0001 BNB/24h，见 Hub 报价）")
+    print("   · 结算资金  ：USDT(BEP-20) 用于订阅其他 Agent 的服务；服务收益也到本地址")
+    print("   · 定期查看  ：python3 agent_cli.py balance")
+    print("   · 转出收益  ：python3 agent_cli.py withdraw --to 0x收款地址 --token usdt --amount 数量")
+    print()
 
 
 def _create_identity(args, config_path: str) -> tuple[Wallet, KeyPair, dict]:
@@ -209,6 +215,61 @@ def _create_identity(args, config_path: str) -> tuple[Wallet, KeyPair, dict]:
 
 
 # ---------------------------------------------------------------------------
+
+
+def cmd_balance(args):
+    """查看钱包余额（BSC 主网只读）：BNB（订阅费）+ USDT/BEP-20（结算/收益）。"""
+    from agent_sdk.chain import get_balances
+    address = getattr(args, "address", "") or ""
+    if not address:
+        config_path = getattr(args, "config", None) or os.path.expanduser("~/.agent-marketplace/agent.json")
+        if os.path.exists(config_path):
+            try:
+                address = json.load(open(config_path)).get("agent_id", "")
+            except Exception:
+                pass
+    if not address:
+        print("❌ 未指定地址：--address 0x... 或先 init（agent.json）")
+        sys.exit(1)
+    print(f"🔍 查询 {address}（BSC 主网）……")
+    bal = get_balances(address)
+    print(f"   BNB  : {bal['bnb']:.6f}")
+    print(f"   USDT : {bal['usdt']:.6f}")
+    print("   提示：BNB 用于订阅费（向平台钱包转微量 BNB/24h）；USDT 用于 Agent 间结算")
+
+
+def cmd_withdraw(args):
+    """转出钱包收益（BNB 原生或 USDT/BEP-20）：EIP-155 签名广播，私钥不落盘。"""
+    from agent_sdk.chain import transfer_bnb, transfer_usdt
+    config_path = args.config or os.path.expanduser("~/.agent-marketplace/agent.json")
+    if not os.path.exists(config_path):
+        print("❌ 未找到身份，请先 init")
+        sys.exit(1)
+    config = json.load(open(config_path))
+    wallet, _ = _load_identity(config, args)
+    to = (args.to or "").lower()
+    if not to.startswith("0x") or len(to) != 42:
+        print("❌ --to 必须是 0x + 40 位 hex 地址")
+        sys.exit(1)
+    print(f"💸 转出 {args.token.upper()} → {to}（BSC 主网）……")
+    if args.token == "usdt":
+        if not args.amount or args.amount <= 0:
+            print("❌ --token usdt 需要 --amount（数量）")
+            sys.exit(1)
+        tx = transfer_usdt(wallet, to, args.amount)
+        print(f"✅ USDT {args.amount} 转出已广播: {tx}")
+    else:
+        if args.all:
+            tx = transfer_bnb(wallet, to, all_balance=True)
+            print(f"✅ BNB 全部转出（扣除 gas）已广播: {tx}")
+        else:
+            if not args.amount or args.amount <= 0:
+                print("❌ --token bnb 需要 --amount 或 --all")
+                sys.exit(1)
+            tx = transfer_bnb(wallet, to, amount_bnb=args.amount)
+            print(f"✅ BNB {args.amount} 转出已广播: {tx}")
+    print("   链上确认可在浏览器查看（https://bscscan.com/tx/" + tx + "）")
+
 
 def cmd_info(args):
     client, _, _ = _client()
@@ -806,6 +867,19 @@ def main():
     s.add_argument("--token-file", help="订阅 token 文件（默认 ~/.agent-marketplace/subscriptions/{peer}.json）")
     s.add_argument("--wallet-key")
     s.set_defaults(fn=cmd_invoke)
+
+    s = sub.add_parser("balance", help="查看钱包余额（BSC 主网只读：BNB + USDT/BEP-20）")
+    s.add_argument("--address", help="钱包地址（默认 agent.json 的 agent_id）")
+    s.add_argument("--config", help="身份文件（默认 ~/.agent-marketplace/agent.json）")
+    s.set_defaults(fn=cmd_balance)
+
+    s = sub.add_parser("withdraw", help="转出钱包收益（BNB 或 USDT/BEP-20，EIP-155 签名广播）")
+    s.add_argument("--to", required=True, help="收款地址 0x...")
+    s.add_argument("--token", default="bnb", choices=["bnb", "usdt"], help="币种（默认 bnb）")
+    s.add_argument("--amount", type=float, help="转出数量；bnb 可用 --all 转出全部（扣 gas）")
+    s.add_argument("--all", action="store_true", help="转出全部 BNB")
+    s.add_argument("--config", help="身份文件（默认 ~/.agent-marketplace/agent.json，私钥服务密钥自动解密）")
+    s.set_defaults(fn=cmd_withdraw)
 
     s = sub.add_parser("signer", help="启动钱包签名服务（私钥隔离，Agent 不持私钥）")
     s.add_argument("--port", type=int, default=int(os.environ.get("AGENT_SIGNER_PORT", "20101")))

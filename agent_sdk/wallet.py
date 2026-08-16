@@ -82,9 +82,10 @@ def keccak_f1600(state: list[int]) -> list[int]:
 
 def keccak256(data: bytes) -> bytes:
     rate = 136  # 1088 bits
+    # pad10*1：M || 0x01 || 0x00*（补到 rate-1）|| 0x80（总长 = rate 的倍数）
     padded = bytearray(data)
     padded.append(0x01)
-    while len(padded) % rate != 0:
+    while len(padded) % rate != rate - 1:
         padded.append(0x00)
     padded.append(0x80)
     state = [0] * 25
@@ -165,10 +166,12 @@ class Wallet:
     # -- 签名（标准 r||s||v 65 字节，v 内嵌 rec_id）-----------------------
 
     def sign(self, message: bytes) -> str:
-        """ECDSA 签名，返回 0x + r(32) + s(32) + v(1) = 65 字节 hex。"""
-        der = self._priv.sign(message, ec.ECDSA(hashes.SHA256()))
+        """ECDSA 签名（以太坊标准：对 keccak256(message) 的 32 字节哈希签名），
+        返回 0x + r(32) + s(32) + v(1) = 65 字节 hex，v = rec_id（0-3）。"""
+        msg_hash = keccak256(message)
+        der = self._priv.sign(msg_hash, ec.ECDSA(utils.Prehashed(hashes.SHA256())))
         r, s = utils.decode_dss_signature(der)
-        v = self._find_rec_id(r, s, message)
+        v = self._find_rec_id(r, s, message)   # 对同一 keccak 哈希枚举 rec_id
         return "0x" + r.to_bytes(32, "big").hex() + s.to_bytes(32, "big").hex() + v.to_bytes(1, "big").hex()
 
     def sign_text(self, text: str) -> str:
@@ -197,7 +200,8 @@ class Wallet:
         try:
             r, s, v = parse_signature(signature_hex)
             der = utils.encode_dss_signature(r, s)
-            self._priv.public_key().verify(der, message, ec.ECDSA(hashes.SHA256()))
+            self._priv.public_key().verify(der, keccak256(message),
+                                           ec.ECDSA(utils.Prehashed(hashes.SHA256())))
             return True
         except Exception:
             return False
@@ -284,7 +288,7 @@ def _recover_point(r: int, s: int, message: bytes, rec_id: int) -> tuple[int, in
         y = _P - y
     R = (x, y)
     try:
-        e = int.from_bytes(_sha256(message), "big")
+        e = int.from_bytes(keccak256(message), "big")
         eG = _point_mul(_G, e)
         sR = _point_mul(R, s)
         Q = _point_mul(_point_add(sR, (eG[0], (-eG[1]) % _P)), pow(r, -1, _N))

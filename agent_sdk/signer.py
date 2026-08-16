@@ -223,10 +223,11 @@ class WalletSignerClient:
             from cryptography.hazmat.primitives.asymmetric import ec as _ec
             from cryptography.hazmat.primitives import hashes as _h
             from cryptography.hazmat.primitives.asymmetric import utils as _u
-            from .wallet import parse_signature
+            from .wallet import parse_signature, keccak256
             r, s, _ = parse_signature(signature_hex)
             pub = _ec.EllipticCurvePublicKey.from_encoded_point(_ec.SECP256K1(), self.public_key_bytes)
-            pub.verify(_u.encode_dss_signature(r, s), message, _ec.ECDSA(_h.SHA256()))
+            pub.verify(_u.encode_dss_signature(r, s), keccak256(message),
+                       _ec.ECDSA(_u.Prehashed(_h.SHA256())))
             return True
         except Exception:
             return False
