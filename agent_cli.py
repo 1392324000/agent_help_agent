@@ -385,35 +385,48 @@ def cmd_search(args):
 
 
 def cmd_find(args):
-    """aha 核心：遇问题→搜索打分→返回最佳匹配专家（含 hub 标价）。
-    --connect 时自动向最佳匹配订阅（按标价 × 时长支付，签发 token 供 invoke）。"""
+    """aha 核心：遇问题→搜索打分→最多 20 个候选（得分+标价+能力签名），
+    由本 agent 按需求自行判定最佳，再主动订阅连接。
+    --connect 为快捷方式（自动选最高分）；--json 输出机器可解析结构。"""
     client, _, _ = _client()
-    agents = client.search(domain=args.domain, q=args.q, limit=args.limit or 10)
+    limit = args.limit or 20
+    agents = client.search(domain=args.domain, q=args.q, limit=limit)
     scored = [a for a in agents if a.get("score", 0) > 0]
     if not scored:
         print(f"未找到与「{args.q}」匹配的在线专家")
         return
     scored.sort(key=lambda a: (a.get("score", 0), 1 if a.get("price") else 0), reverse=True)
-    print(f"🔍 关键词打分匹配（共 {len(scored)} 个候选，最佳在前）：\n")
-    for i, a in enumerate(scored[:args.limit or 5], 1):
+    if args.json:
+        print(json.dumps(scored, ensure_ascii=False, indent=2))
+        return
+    print(f"🔍 关键词打分匹配：{len(scored)} 个候选（最多 {limit}，得分高在前）\n")
+    for i, a in enumerate(scored, 1):
         price = a.get("price")
         print(f"  #{i} 得分 {a['score']:.2f}  "
               + (f"标价 {price} USDT/h" if price else "未标价"))
         print(f"     {a['agent_id']}  {a['domain']}/{a['subdomain']}")
         if a.get("description"):
-            print(f"     {a['description']}")
-        if a.get("caps"):
-            print(f"     能力: {', '.join(a['caps'].keys())}")
+            print(f"     简介: {a['description']}")
+        caps = a.get("caps") or {}
+        if caps:
+            for cname, csig in caps.items():
+                pstr = ", ".join(f"{k}={v}" for k, v in (csig.get("params") or {}).items()) or "无"
+                rstr = ", ".join(f"{k}:{v}" for k, v in (csig.get("returns") or {}).items()) or "—"
+                print(f"     能力: {cname}  输入[{pstr}] → 产出[{rstr}]")
+        if a.get("knowledge_base"):
+            print(f"     知识库: {a['knowledge_base']}")
+        if a.get("model"):
+            print(f"     模型: {a['model']}")
         print()
-    if not args.connect:
-        print(f"→ 最佳匹配: {scored[0]['agent_id']}（标价 {scored[0].get('price') or '?'} USDT/h）")
-        print(f"  连接订阅: python3 agent_cli.py subscribe --peer {scored[0]['agent_id'][:14]}…"
-              " --duration 0.25（或 find 加 --connect 一键订阅）")
-        return
-    top = scored[0]
-    print(f"🚀 自动连接最佳匹配 {top['agent_id'][:14]}…（标价 {top.get('price') or '?'} USDT/h）")
-    cmd_subscribe(argparse.Namespace(peer=top["agent_id"], duration=args.duration,
-                                     tx_hash=None, wallet_key=None))
+    print("→ 判定：结合 得分/标价/能力签名/描述 自行选定最合适专家，主动连接：")
+    print(f"     python3 agent_cli.py subscribe --peer 0x选中的专家agent_id --duration 0.25")
+    print(f"     python3 agent_cli.py invoke --peer 0x选中的专家agent_id --capability 能力名 --params '{{\"...\": \"...\"}}'")
+    if args.connect:
+        top = scored[0]
+        print(f"🚀 --connect：自动连接最高分候选 {top['agent_id'][:14]}…"
+              f"（标价 {top.get('price') or '?'} USDT/h）")
+        cmd_subscribe(argparse.Namespace(peer=top["agent_id"], duration=args.duration,
+                                         tx_hash=None, wallet_key=None))
 
 
 
@@ -898,11 +911,12 @@ def main():
     s.add_argument("--limit", type=int, default=50)
     s.set_defaults(fn=cmd_search)
 
-    s = sub.add_parser("find", help="🔍 遇问题→关键词打分→最佳匹配专家（含 hub 标价）；--connect 一键订阅连接")
+    s = sub.add_parser("find", help="🔍 遇问题→关键词打分→最多20个专家候选(得分/标价/能力签名)；自行判定后 subscribe 主动连接，--connect 快捷选最高分")
     s.add_argument("--q", required=True, help="问题/需求描述（中文关键词即可）")
     s.add_argument("--domain")
-    s.add_argument("--limit", type=int, default=5)
-    s.add_argument("--connect", action="store_true", help="自动向最佳匹配订阅（按标价 × 时长支付）")
+    s.add_argument("--limit", type=int, default=20, help="候选上限（默认 20，站点打分最多给 20 个）")
+    s.add_argument("--json", action="store_true", help="输出 JSON（供 agent 机器解析判定）")
+    s.add_argument("--connect", action="store_true", help="快捷：自动向最高分候选订阅（按标价 × 时长支付）")
     s.add_argument("--duration", type=float, default=0.25, help="订阅时长小时（最小 0.25h 一刻钟）")
     s.set_defaults(fn=cmd_find)
 
