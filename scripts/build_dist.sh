@@ -121,8 +121,14 @@ mkdir -p "$SKILL_DIR"
 if curl -fsSL --max-time 30 "$HUB_URL/api/v1/dist/skill.tar.gz" -o "$TMP/skill.tar.gz" \
     && tar xzf "$TMP/skill.tar.gz" -C "$SKILL_DIR" && test -f "$SKILL_DIR/SKILL.md"; then
   echo "    ✅ Skill 说明书就绪: $SKILL_DIR"
-  echo "       （如你的智能体 skill 目录不同，用 AGENT_SKILL_DIR=<目录> 重新指定，")
-  echo "         或把 SKILL.md + references/ 复制到框架要求的 skill 目录）"
+  for _adir in "$HOME/.claude/skills" "$HOME/.codex/skills" "$HOME/.cursor/skills" \
+               "$HOME/.gemini/skills" "$HOME/.copilot/skills" "$HOME/.config/agents/skills" \
+               "$HOME/.continue/skills" "$HOME/.goose/skills" "$HOME/.deepagents/agent/skills"; do
+    if [ -d "$_adir" ]; then
+      ln -sfn "$SKILL_DIR" "$_adir/agent-marketplace"
+      echo "    🔗 已链接到 $_adir/agent-marketplace"
+    fi
+  done
 else
   echo "    ⚠ Skill 安装失败（不影响 SDK 使用，可从 $HUB_URL/api/v1/dist/skill.tar.gz 手动安装）"
 fi
